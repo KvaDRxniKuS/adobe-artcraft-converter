@@ -242,9 +242,20 @@ class DirectWriter:
         if not isinstance(self.fc, dict) or self.fc.get('format') != 'filmcraft.project':
             raise ValueError('Входной JSON не является проектом FilmCraft (format=filmcraft.project).')
         project = self.fc.get('project') or {}
-        self.items = {str(k): v for k, v in (project.get('items') or {}).items()}
+        raw_items = project.get('items') or {}
+        if not isinstance(raw_items, dict) or any(not isinstance(item, dict)
+                                                  for item in raw_items.values()):
+            raise ValueError('FilmCraft project.items должен быть словарём элементов.')
+        self.items = {str(k): v for k, v in raw_items.items()}
+        # Some exports keep a clip's numeric item ID in item['id'] while using a
+        # different key in project.items. Resolve that ID only when unambiguous.
+        self.declared_ids: dict[str, list[str]] = {}
+        for key, item in self.items.items():
+            if item.get('id') is not None:
+                self.declared_ids.setdefault(str(item['id']), []).append(key)
         self.project = project
         self.warnings: list[str] = []
+        self.resolved_aliases: set[str] = set()
         self.graph = GraphBuilder()
         self.media: dict[str, MediaHandle] = {}
         self.sequence_handles: dict[str, MediaHandle] = {}
@@ -289,6 +300,23 @@ class DirectWriter:
         if not isinstance(path, str):
             raise ValueError('FilmCraft media path must be a string')
         return path.strip()
+
+    def _item_key(self, ref: object) -> str:
+        """Resolve a timeline item by storage key, then by a unique declared ID."""
+        value = str(ref)
+        if value in self.items:
+            return value
+        keys = self.declared_ids.get(value, [])
+        if len(keys) > 1:
+            raise ValueError(f'FilmCraft ID {value} неоднозначен: элементы project.items '
+                             f'{", ".join(keys)} имеют одинаковое поле id.')
+        if keys:
+            if value not in self.resolved_aliases:
+                self.warnings.append(f'Ссылка на ID {value} найдена по полю id элемента '
+                                     f'project.items[{keys[0]!r}], а не по его ключу.')
+                self.resolved_aliases.add(value)
+            return keys[0]
+        return value
 
     @staticmethod
     def _adapt_audio_layout(objects, channels: int) -> None:
@@ -400,13 +428,23 @@ class DirectWriter:
 
     def _make_clip(self, kind: str, clip: dict, sequence_name: str,
                    width: int, height: int) -> ET.Element:
-        media_id = str(clip.get('item'))
+        raw_id = str(clip.get('item'))
+        media_id = self._item_key(clip.get('item'))
         if media_id not in self.media:
-            source = self.items.get(media_id, {})
+            clip_name = clip.get('name') or 'Без имени'
+            source = self.items.get(media_id)
+            if source is None:
+                raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
+                                 f'отсутствующее медиа {raw_id}: элемента с таким ключом '
+                                 'или полем id нет в project.items.')
             if 'Media' in source.get('kind', {}) and not self._media_path(source):
-                raise ValueError(f'«{sequence_name}»: вложенная последовательность '
-                                 f'«{source.get("name", "") }» не найдена по имени.')
-            raise ValueError(f'«{sequence_name}»: клип ссылается на отсутствующее медиа {media_id}.')
+                raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
+                                 f'медиа {raw_id} «{source.get("name", "") }» без пути; '
+                                 'вложенная последовательность с таким именем не найдена.')
+            kinds = ', '.join(source.get('kind', {})) or 'не указан'
+            raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
+                             f'элемент {raw_id} «{source.get("name", "") }» с kind={kinds}; '
+                             'FC → PR пока не поддерживает этот тип источника.')
         handle = self.media[media_id]
         source_id = handle.video_source if kind == 'video' else handle.audio_source
         if not source_id:
@@ -579,7 +617,7 @@ class DirectWriter:
             children = set()
             for track in (plan.sequence.get('video_tracks') or []) + (plan.sequence.get('audio_tracks') or []):
                 for clip in track.get('items') or []:
-                    item_id = str(clip.get('item'))
+                    item_id = self._item_key(clip.get('item'))
                     target = aliases.get(item_id, item_id)
                     if target in self.sequence_handles:
                         children.add(target)
@@ -631,7 +669,7 @@ class DirectWriter:
             sequence = item['kind']['Sequence']
             for track in (sequence.get('video_tracks') or []) + (sequence.get('audio_tracks') or []):
                 for clip in track.get('items') or []:
-                    item_id = str(clip.get('item'))
+                    item_id = self._item_key(clip.get('item'))
                     end = int(clip.get('source_in') or 0) + int(clip.get('duration') or 0)
                     self.media_needed_span[item_id] = max(self.media_needed_span.get(item_id, 0), end)
         self._apply_shell_metadata()

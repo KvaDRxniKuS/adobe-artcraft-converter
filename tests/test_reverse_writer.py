@@ -243,6 +243,67 @@ class DirectWriterTests(unittest.TestCase):
         self.assertIn('изменённых параметров не перенесено', text)
         self.assertIn('отключённый клип', text)
 
+    def test_clip_resolves_unique_declared_id_when_items_key_is_different(self):
+        items = self.document['project']['items']
+        items['asset-video'] = items.pop('1')
+        items['asset-video']['id'] = 314
+        for sequence in (items['10'], items['20']):
+            for track in sequence['kind']['Sequence']['video_tracks']:
+                for clip in track['items']:
+                    if clip['item'] == 1:
+                        clip['item'] = 314
+        self.save_fc()
+        warnings = DirectWriter(self.source).write(self.output)
+        self.assertTrue(any('ID 314 найден' in message for message in warnings))
+        converted = Converter(self.output).convert(self.base / 'declared_id.fcproj')
+        clips = [clip for item in converted['project']['items'].values()
+                 if 'Sequence' in item.get('kind', {})
+                 for track in item['kind']['Sequence']['video_tracks']
+                 for clip in track['items']]
+        self.assertEqual(len(clips), 4)
+        self.assertEqual(len(self.read_root(self.output).findall('Media')), 2)
+
+    def test_nested_sequence_resolves_by_declared_id(self):
+        items = self.document['project']['items']
+        items['sequence-two'] = items.pop('20')
+        items['sequence-two']['id'] = 314
+        items['10']['kind']['Sequence']['video_tracks'][0]['items'].append(
+            fc_clip(32, 314, 'Nested', 5*TICKS, TICKS))
+        self.save_fc()
+        DirectWriter(self.source).write(self.output)
+        returned = Converter(self.output).convert(self.base / 'nested_by_id.fcproj')
+        main = next(i['kind']['Sequence'] for i in returned['project']['items'].values()
+                    if i.get('name') == 'Main' and 'Sequence' in i.get('kind', {}))
+        self.assertEqual(main['video_tracks'][0]['items'][-1]['name'], 'Nested')
+        self.assertEqual(len(self.read_root(self.output).findall('Sequence')), 2)
+
+    def test_missing_or_unsupported_item_explains_which_clip_and_why(self):
+        clip = self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][0]['items'][0]
+        clip['item'] = 314
+        self.save_fc()
+        with self.assertRaisesRegex(ValueError, 'Shot A.*314.*project.items'):
+            DirectWriter(self.source).write(self.output)
+        self.assertFalse(self.output.exists())
+
+        self.document['project']['items']['314'] = {
+            'id': 314, 'name': 'A title', 'kind': {'Generator': {}}}
+        self.save_fc()
+        with self.assertRaisesRegex(ValueError, 'Shot A.*314.*Generator'):
+            DirectWriter(self.source).write(self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_ambiguous_declared_ids_are_not_mapped_to_the_wrong_media(self):
+        self.document['project']['items']['asset-one'] = {
+            'id': 314, 'kind': {'Media': {'media': {'File': {'path': str(self.video)}}}}}
+        self.document['project']['items']['asset-two'] = {
+            'id': 314, 'kind': {'Media': {'media': {'File': {'path': str(self.audio)}}}}}
+        clip = self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][0]['items'][0]
+        clip['item'] = 314
+        self.save_fc()
+        with self.assertRaisesRegex(ValueError, 'ID 314 неоднозначен'):
+            DirectWriter(self.source).write(self.output)
+        self.assertFalse(self.output.exists())
+
     def test_invalid_references_overlaps_and_cycles_do_not_replace_project(self):
         self.output.write_bytes(b'keep old output')
         clip = self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][0]['items'][0]

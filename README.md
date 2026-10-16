@@ -74,7 +74,7 @@ py -3 fcproj_to_prproj.py project.fcproj output.prproj
 py -3 fcproj_to_prproj.py project.fcproj output.prproj --shell empty-premiere-shell.prproj
 ```
 
-This remains **experimental**. The embedded graph is a structural starting point, not a verified Premiere export for every version. The converter currently does not reverse-map effects, transitions, retiming, and several audio/track/sequence properties; omissions are reported. It rejects missing references, overlapping clips on one track and cyclic nesting rather than silently creating an inconsistent project; other unsupported properties are reported as omissions. Round-trip XML/reference tests **do not prove Premiere Pro opens or renders the output**. Keep original projects, read the report and check results in your Premiere version before relying on them.
+This remains **experimental**. The embedded graph is a structural starting point, not a verified Premiere export for every version. The converter currently does not reverse-map effects, transitions, retiming, and several audio/track/sequence properties; omissions are reported. It resolves clip references by `project.items` key or an unambiguous item `id`. If a referenced item is truly absent from `project.items`, it cannot reconstruct that clip from its numeric ID alone and reports the clip name/ID. It rejects missing references, overlapping clips on one track and cyclic nesting rather than silently creating an inconsistent project; other unsupported properties are reported as omissions. Round-trip XML/reference tests **do not prove Premiere Pro opens or renders the output**. Keep original projects, read the report and check results in your Premiere version before relying on them.
 
 ## Development checks
 
@@ -162,7 +162,7 @@ py -3 fcproj_to_prproj.py project.fcproj output.prproj
 py -3 fcproj_to_prproj.py project.fcproj output.prproj --shell empty-premiere-shell.prproj
 ```
 
-Это всё ещё **экспериментальный**, а не универсальный обратный конвертер. Эффекты, переходы, изменение скорости и ряд свойств аудио/дорожек/последовательностей пока не переносятся — пропуски отмечаются в отчёте. Отсутствующие ссылки, перекрывающиеся клипы на одной дорожке и циклические вложения отклоняются с ошибкой. Проверка XML и ссылок в тестах **не доказывает**, что Premiere Pro откроет или воспроизведёт файл. Сохраняйте оригиналы, читайте отчёт и проверяйте результат в своей версии Premiere.
+Это всё ещё **экспериментальный**, а не универсальный обратный конвертер. Эффекты, переходы, изменение скорости и ряд свойств аудио/дорожек/последовательностей пока не переносятся — пропуски отмечаются в отчёте. Ссылки на клипы ищутся по ключу `project.items` или по однозначному полю `id`. Если элемент действительно отсутствует в `project.items`, восстановить исходник по одному числовому ID нельзя: ошибка укажет имя клипа и ID. Отсутствующие ссылки, перекрывающиеся клипы на одной дорожке и циклические вложения отклоняются с ошибкой. Проверка XML и ссылок в тестах **не доказывает**, что Premiere Pro откроет или воспроизведёт файл. Сохраняйте оригиналы, читайте отчёт и проверяйте результат в своей версии Premiere.
 
 ## Проверки разработки
 
