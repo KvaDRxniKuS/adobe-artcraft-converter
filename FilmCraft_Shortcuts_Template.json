@@ -1,0 +1,1333 @@
+{
+  "format": "filmcraft-keyboard-shortcuts",
+  "version": 1,
+  "name": "FilmCraft Mapping Catalog (blank template)",
+  "modified": false,
+  "bindings": [
+    {
+      "command": "sequence.close",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "tool.selection",
+      "keys": ""
+    },
+    {
+      "command": "tool.trackSelectBackward",
+      "keys": ""
+    },
+    {
+      "command": "tool.trackSelectForward",
+      "keys": ""
+    },
+    {
+      "command": "tool.ripple",
+      "keys": ""
+    },
+    {
+      "command": "tool.rolling",
+      "keys": ""
+    },
+    {
+      "command": "tool.rateStretch",
+      "keys": ""
+    },
+    {
+      "command": "tool.razor",
+      "keys": ""
+    },
+    {
+      "command": "tool.slip",
+      "keys": ""
+    },
+    {
+      "command": "tool.slide",
+      "keys": ""
+    },
+    {
+      "command": "tool.pen",
+      "keys": ""
+    },
+    {
+      "command": "tool.hand",
+      "keys": ""
+    },
+    {
+      "command": "tool.zoom",
+      "keys": ""
+    },
+    {
+      "command": "tool.type",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera1",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera2",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera3",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera4",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera5",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera6",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera7",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera8",
+      "keys": ""
+    },
+    {
+      "command": "multicam.selectCamera9",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera1",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera2",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera3",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera4",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera5",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera6",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera7",
+      "keys": ""
+    },
+    {
+      "command": "multicam.cutToCamera8",
+      "keys": ""
+    },
+    {
+      "command": "multicam.recordToggle",
+      "keys": ""
+    },
+    {
+      "command": "multicam.toggleView",
+      "keys": ""
+    },
+    {
+      "command": "app.settings.general",
+      "keys": ""
+    },
+    {
+      "command": "app.keyboardShortcuts",
+      "keys": ""
+    },
+    {
+      "command": "file.newProject",
+      "keys": ""
+    },
+    {
+      "command": "file.newSequence",
+      "keys": ""
+    },
+    {
+      "command": "file.newBin",
+      "keys": ""
+    },
+    {
+      "command": "file.newBin",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "file.open",
+      "keys": ""
+    },
+    {
+      "command": "file.save",
+      "keys": ""
+    },
+    {
+      "command": "file.saveAs",
+      "keys": ""
+    },
+    {
+      "command": "file.saveCopy",
+      "keys": ""
+    },
+    {
+      "command": "file.import",
+      "keys": ""
+    },
+    {
+      "command": "mode.export",
+      "keys": ""
+    },
+    {
+      "command": "edit.undo",
+      "keys": ""
+    },
+    {
+      "command": "edit.redo",
+      "keys": ""
+    },
+    {
+      "command": "edit.cut",
+      "keys": ""
+    },
+    {
+      "command": "edit.copy",
+      "keys": ""
+    },
+    {
+      "command": "edit.paste",
+      "keys": ""
+    },
+    {
+      "command": "edit.pasteInsert",
+      "keys": ""
+    },
+    {
+      "command": "edit.clear",
+      "keys": ""
+    },
+    {
+      "command": "edit.clear",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "edit.rippleDelete",
+      "keys": ""
+    },
+    {
+      "command": "edit.rippleDelete",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "edit.duplicate",
+      "keys": ""
+    },
+    {
+      "command": "edit.selectAll",
+      "keys": ""
+    },
+    {
+      "command": "edit.deselectAll",
+      "keys": ""
+    },
+    {
+      "command": "clip.speedDuration",
+      "keys": ""
+    },
+    {
+      "command": "source.insert",
+      "keys": ""
+    },
+    {
+      "command": "source.overwrite",
+      "keys": ""
+    },
+    {
+      "command": "clip.enable",
+      "keys": ""
+    },
+    {
+      "command": "clip.link",
+      "keys": ""
+    },
+    {
+      "command": "clip.group",
+      "keys": ""
+    },
+    {
+      "command": "clip.ungroup",
+      "keys": ""
+    },
+    {
+      "command": "clip.audioGain",
+      "keys": ""
+    },
+    {
+      "command": "sequence.renderEffectsInToOut",
+      "keys": ""
+    },
+    {
+      "command": "sequence.matchFrame",
+      "keys": ""
+    },
+    {
+      "command": "sequence.addEdit",
+      "keys": ""
+    },
+    {
+      "command": "sequence.addEditAllTracks",
+      "keys": ""
+    },
+    {
+      "command": "trim.edit",
+      "keys": ""
+    },
+    {
+      "command": "trim.extendToPlayhead",
+      "keys": ""
+    },
+    {
+      "command": "sequence.applyVideoTransition",
+      "keys": ""
+    },
+    {
+      "command": "sequence.applyAudioTransition",
+      "keys": ""
+    },
+    {
+      "command": "trim.applyDefaultTransition",
+      "keys": ""
+    },
+    {
+      "command": "sequence.lift",
+      "keys": ""
+    },
+    {
+      "command": "sequence.extract",
+      "keys": ""
+    },
+    {
+      "command": "view.zoomIn",
+      "keys": ""
+    },
+    {
+      "command": "view.zoomOut",
+      "keys": ""
+    },
+    {
+      "command": "sequence.snap",
+      "keys": ""
+    },
+    {
+      "command": "markers.markIn",
+      "keys": ""
+    },
+    {
+      "command": "markers.markOut",
+      "keys": ""
+    },
+    {
+      "command": "markers.markClip",
+      "keys": ""
+    },
+    {
+      "command": "markers.markSelection",
+      "keys": ""
+    },
+    {
+      "command": "markers.goToIn",
+      "keys": ""
+    },
+    {
+      "command": "markers.goToOut",
+      "keys": ""
+    },
+    {
+      "command": "markers.clearIn",
+      "keys": ""
+    },
+    {
+      "command": "markers.clearOut",
+      "keys": ""
+    },
+    {
+      "command": "markers.clearInOut",
+      "keys": ""
+    },
+    {
+      "command": "markers.add",
+      "keys": ""
+    },
+    {
+      "command": "markers.goNext",
+      "keys": ""
+    },
+    {
+      "command": "markers.goPrev",
+      "keys": ""
+    },
+    {
+      "command": "markers.clearCurrent",
+      "keys": ""
+    },
+    {
+      "command": "markers.clearAll",
+      "keys": ""
+    },
+    {
+      "command": "sequence.reverseMatchFrame",
+      "keys": ""
+    },
+    {
+      "command": "sequence.goToNextGap",
+      "keys": ""
+    },
+    {
+      "command": "sequence.goToPrevGap",
+      "keys": ""
+    },
+    {
+      "command": "sequence.makeSubsequence",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.reset",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.editing",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.assembly",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.color",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.effects",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.audio",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.captionsandgraphics",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.Project",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.Source",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.Timeline",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.Program",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.EffectControls",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.AudioTrackMixer",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.Effects",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.MediaBrowser",
+      "keys": ""
+    },
+    {
+      "command": "window.panel.AudioClipMixer",
+      "keys": ""
+    },
+    {
+      "command": "captions.newTrack",
+      "keys": ""
+    },
+    {
+      "command": "captions.add",
+      "keys": ""
+    },
+    {
+      "command": "captions.next",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "captions.previous",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "playhead.nextEdit",
+      "keys": ""
+    },
+    {
+      "command": "playhead.prevEdit",
+      "keys": ""
+    },
+    {
+      "command": "playhead.start",
+      "keys": ""
+    },
+    {
+      "command": "playhead.end",
+      "keys": ""
+    },
+    {
+      "command": "playhead.stepBack",
+      "keys": ""
+    },
+    {
+      "command": "playhead.stepBack5",
+      "keys": ""
+    },
+    {
+      "command": "playhead.stepForward",
+      "keys": ""
+    },
+    {
+      "command": "playhead.stepForward5",
+      "keys": ""
+    },
+    {
+      "command": "playback.toggle",
+      "keys": ""
+    },
+    {
+      "command": "playback.reverse",
+      "keys": ""
+    },
+    {
+      "command": "playback.stop",
+      "keys": ""
+    },
+    {
+      "command": "playback.forward",
+      "keys": ""
+    },
+    {
+      "command": "playback.slowReverse",
+      "keys": ""
+    },
+    {
+      "command": "playback.slowForward",
+      "keys": ""
+    },
+    {
+      "command": "playback.playAround",
+      "keys": ""
+    },
+    {
+      "command": "playback.inToOut",
+      "keys": ""
+    },
+    {
+      "command": "view.zoomToSequence",
+      "keys": ""
+    },
+    {
+      "command": "trim.ripplePrevious",
+      "keys": ""
+    },
+    {
+      "command": "trim.rippleNext",
+      "keys": ""
+    },
+    {
+      "command": "trim.previous",
+      "keys": ""
+    },
+    {
+      "command": "trim.next",
+      "keys": ""
+    },
+    {
+      "command": "trim.backward",
+      "keys": ""
+    },
+    {
+      "command": "trim.backwardMany",
+      "keys": ""
+    },
+    {
+      "command": "trim.forward",
+      "keys": ""
+    },
+    {
+      "command": "trim.forwardMany",
+      "keys": ""
+    },
+    {
+      "command": "file.close",
+      "keys": ""
+    },
+    {
+      "command": "file.closeProject",
+      "keys": ""
+    },
+    {
+      "command": "file.importFromMediaBrowser",
+      "keys": ""
+    },
+    {
+      "command": "export.queue.add",
+      "keys": ""
+    },
+    {
+      "command": "file.mediaProperties",
+      "keys": ""
+    },
+    {
+      "command": "edit.pasteAttributes",
+      "keys": ""
+    },
+    {
+      "command": "edit.find",
+      "keys": ""
+    },
+    {
+      "command": "edit.editOriginal",
+      "keys": ""
+    },
+    {
+      "command": "clip.makeSubclip",
+      "keys": ""
+    },
+    {
+      "command": "clip.audioChannels",
+      "keys": ""
+    },
+    {
+      "command": "graphics.newText",
+      "keys": ""
+    },
+    {
+      "command": "graphics.newRectangle",
+      "keys": ""
+    },
+    {
+      "command": "graphics.newEllipse",
+      "keys": ""
+    },
+    {
+      "command": "graphics.bringToFront",
+      "keys": ""
+    },
+    {
+      "command": "graphics.bringForward",
+      "keys": ""
+    },
+    {
+      "command": "graphics.sendBackward",
+      "keys": ""
+    },
+    {
+      "command": "graphics.sendToBack",
+      "keys": ""
+    },
+    {
+      "command": "graphics.selectNextLayer",
+      "keys": ""
+    },
+    {
+      "command": "graphics.selectPreviousLayer",
+      "keys": ""
+    },
+    {
+      "command": "graphics.beginTextEditing",
+      "keys": ""
+    },
+    {
+      "command": "graphics.alignTextLeft",
+      "keys": ""
+    },
+    {
+      "command": "graphics.alignTextCenter",
+      "keys": ""
+    },
+    {
+      "command": "graphics.alignTextRight",
+      "keys": ""
+    },
+    {
+      "command": "graphics.fontSizeUp",
+      "keys": ""
+    },
+    {
+      "command": "graphics.fontSizeDown",
+      "keys": ""
+    },
+    {
+      "command": "graphics.fontSizeUp5",
+      "keys": ""
+    },
+    {
+      "command": "graphics.fontSizeDown5",
+      "keys": ""
+    },
+    {
+      "command": "graphics.leadingUp",
+      "keys": ""
+    },
+    {
+      "command": "graphics.leadingDown",
+      "keys": ""
+    },
+    {
+      "command": "graphics.leadingUp5",
+      "keys": ""
+    },
+    {
+      "command": "graphics.leadingDown5",
+      "keys": ""
+    },
+    {
+      "command": "help.filmcraftHelp",
+      "keys": ""
+    },
+    {
+      "command": "app.quit",
+      "keys": ""
+    },
+    {
+      "command": "clip.setPosterFrame",
+      "keys": ""
+    },
+    {
+      "command": "clip.clearPosterFrame",
+      "keys": ""
+    },
+    {
+      "command": "clip.volumeUp",
+      "keys": ""
+    },
+    {
+      "command": "clip.volumeDown",
+      "keys": ""
+    },
+    {
+      "command": "clip.volumeUpMany",
+      "keys": ""
+    },
+    {
+      "command": "clip.volumeDownMany",
+      "keys": ""
+    },
+    {
+      "command": "timeline.expandAllTracks",
+      "keys": ""
+    },
+    {
+      "command": "timeline.minimizeAllTracks",
+      "keys": ""
+    },
+    {
+      "command": "file.exportFrame",
+      "keys": ""
+    },
+    {
+      "command": "trim.extendPreviousEdit",
+      "keys": ""
+    },
+    {
+      "command": "trim.extendNextEdit",
+      "keys": ""
+    },
+    {
+      "command": "playhead.nextEditAnyTrack",
+      "keys": ""
+    },
+    {
+      "command": "playhead.prevEditAnyTrack",
+      "keys": ""
+    },
+    {
+      "command": "playhead.selectedClipStart",
+      "keys": ""
+    },
+    {
+      "command": "playhead.selectedClipEnd",
+      "keys": ""
+    },
+    {
+      "command": "window.maximizeFrame",
+      "keys": ""
+    },
+    {
+      "command": "window.maximizeFrameUnderCursor",
+      "keys": ""
+    },
+    {
+      "command": "window.toggleFullScreen",
+      "keys": ""
+    },
+    {
+      "command": "window.openSearch",
+      "keys": ""
+    },
+    {
+      "command": "panel.selectFindBox",
+      "keys": ""
+    },
+    {
+      "command": "playback.inToOutPreroll",
+      "keys": ""
+    },
+    {
+      "command": "playback.toOut",
+      "keys": ""
+    },
+    {
+      "command": "sequence.revealNested",
+      "keys": ""
+    },
+    {
+      "command": "timeline.selectClipAtPlayhead",
+      "keys": ""
+    },
+    {
+      "command": "timeline.selectNextClip",
+      "keys": ""
+    },
+    {
+      "command": "timeline.selectPrevClip",
+      "keys": ""
+    },
+    {
+      "command": "window.nextPanel",
+      "keys": ""
+    },
+    {
+      "command": "window.prevPanel",
+      "keys": ""
+    },
+    {
+      "command": "timeline.toggleAllAudioTargets",
+      "keys": ""
+    },
+    {
+      "command": "timeline.toggleAllSourceAudio",
+      "keys": ""
+    },
+    {
+      "command": "timeline.toggleAllSourceVideo",
+      "keys": ""
+    },
+    {
+      "command": "timeline.toggleAllVideoTargets",
+      "keys": ""
+    },
+    {
+      "command": "audio.toggleScrubbing",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.learning",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.review",
+      "keys": ""
+    },
+    {
+      "command": "window.workspace.allpanels",
+      "keys": ""
+    },
+    {
+      "command": "view.programZoom100",
+      "keys": ""
+    },
+    {
+      "command": "view.programZoomFit",
+      "keys": ""
+    },
+    {
+      "command": "view.sourceZoom100",
+      "keys": ""
+    },
+    {
+      "command": "view.sourceZoomFit",
+      "keys": ""
+    },
+    {
+      "command": "file.newBinFromSelection",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "edit.paste",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "edit.pasteInsert",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "project.delete",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "source.open",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "edit.undo",
+      "keys": "",
+      "panel": "History"
+    },
+    {
+      "command": "edit.redo",
+      "keys": "",
+      "panel": "History"
+    },
+    {
+      "command": "timeline.nudgeLeft",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.nudgeRight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.nudgeLeft5",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.nudgeRight5",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.nudgeUp",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.nudgeDown",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slipLeft",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slipRight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slipLeft5",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slipRight5",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slideLeft",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slideRight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slideLeft5",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.slideRight5",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.increaseVideoHeight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.decreaseVideoHeight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.increaseAudioHeight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.decreaseAudioHeight",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.nextScreen",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "timeline.prevScreen",
+      "keys": "",
+      "panel": "Timeline"
+    },
+    {
+      "command": "graphics.nudgeLeft",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeRight",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeUp",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeDown",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeLeft5",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeRight5",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeUp5",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeDown5",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "graphics.nudgeLeft",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeRight",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeUp",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeDown",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeLeft5",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeRight5",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeUp5",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "graphics.nudgeDown5",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "edit.clear",
+      "keys": "",
+      "panel": "Properties"
+    },
+    {
+      "command": "view.showRulers",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "view.showGuides",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "view.snapInProgramMonitor",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "view.lockGuides",
+      "keys": "",
+      "panel": "Program"
+    },
+    {
+      "command": "projectPanel.viewList",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.viewIcon",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.toggleView",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.hoverScrub",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.markIn",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.markOut",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.thumbnailLarger",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.thumbnailLarger",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.thumbnailSmaller",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.thumbnailSmaller",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.moveUp",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.moveDown",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.moveLeft",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.moveRight",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.moveHome",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.moveEnd",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.movePageUp",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.movePageDown",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.extendUp",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.extendDown",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.extendLeft",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "projectPanel.extendRight",
+      "keys": "",
+      "panel": "Project"
+    },
+    {
+      "command": "textPanel.prevWord",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.nextWord",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.selectPrevWord",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.selectNextWord",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.prevLine",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.nextLine",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.selectPrevLine",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.selectNextLine",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.segmentStart",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.segmentEnd",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.selectToSegmentStart",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.selectToSegmentEnd",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.delete",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.rippleDelete",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "textPanel.showProgramTranscript",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "captions.merge",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "captions.split",
+      "keys": "",
+      "panel": "Text"
+    },
+    {
+      "command": "playback.loop",
+      "keys": "",
+      "panel": "Audio Track Mixer"
+    },
+    {
+      "command": "playback.toggle",
+      "keys": "",
+      "panel": "Metadata"
+    },
+    {
+      "command": "playback.loop",
+      "keys": "",
+      "panel": "Metadata"
+    },
+    {
+      "command": "mediaBrowser.openInSource",
+      "keys": "",
+      "panel": "Media Browser"
+    }
+  ]
+}
