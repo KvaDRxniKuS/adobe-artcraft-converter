@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QLineEdit,
     QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView, QVBoxLayout,
     QHBoxLayout, QProgressBar, QMessageBox, QAbstractItemView, QSizePolicy, QDialog, QComboBox,
-    QScrollArea,
+    QScrollArea, QCheckBox,
 )
 from project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
 from reverse_project import ReportWriteError
@@ -28,7 +28,7 @@ TEXT = {
         'remove':'Удалить выбранные','clear':'Очистить очередь','output_folder':'ПАПКА ВЫВОДА','configurable':'настраивается',
         'output_placeholder':'Папка для результатов .fcproj и .prproj','browse':'Обзор…','queue':'ОЧЕРЕДЬ','project':'Проект','direction':'Направление',
         'status':'Статус','result':'Результат','ready':'Готов к работе','open_folder':'Открыть папку',
-        'convert_queue':'Конвертировать очередь','footnote':'Исходные медиа не копируются; для Graphic создаются PNG рядом с результатом. FC → PR экспериментален: проверьте проект в Premiere и прочтите отчёт.',
+        'convert_queue':'Конвертировать очередь','footnote':'Исходные медиа не копируются. Простой текст Graphic создаётся как редактируемый титр; остальные Graphic — PNG. FC → PR экспериментален: проверьте результат в Premiere.',
         'state_pending':'Ожидает','state_running':'Конвертация…','state_done':'Готово','state_error':'Ошибка','dash':'—',
         'count_zero':'0 проектов','count_projects':'{n} проектов','count_one':'{n} проект','count_few':'{n} проекта',
         'added':'Добавлено в очередь: {n}','queue_cleared':'Очередь очищена','folder_error_title':'Папка недоступна',
@@ -51,7 +51,8 @@ TEXT = {
         'shortcut_summary_default':'Конвертация выполнена. См. отчёт для списка назначений и предупреждений.',
         'dir_pr_fc':'PR → FC','dir_fc_pr':'FC → PR · эксперим.',
         'reverse_heading':'ПАРАМЕТРЫ FC → PR · {name}',
-        'reverse_note':'Прямой FC → PR не требует заполненного проекта Premiere. Пустая оболочка необязательна. Текст Graphic сохраняется в растровый PNG, не в редактируемый титр. Проверьте результат в Premiere Pro.',
+        'reverse_note':'Прямой FC → PR не требует заполненного проекта Premiere. Пустая оболочка необязательна. Простой статичный Graphic-текст преобразуется в редактируемый титр; для сложных случаев остаётся PNG. Проверьте результат в Premiere Pro.',
+        'raster_checkbox':'Использовать PNG для Graphic (режим совместимости, текст не редактируется)',
         'shell_label':'Пустая оболочка (необязательно)',
         'shell_placeholder':'Пустой .prproj вашей версии, необязательно',
         'choose_shell_project':'Выберите пустую оболочку Premiere (необязательно)',
@@ -68,7 +69,7 @@ TEXT = {
         'remove':'Remove selected','clear':'Clear queue','output_folder':'OUTPUT FOLDER','configurable':'configurable',
         'output_placeholder':'Output folder for .fcproj and .prproj','browse':'Browse…','queue':'QUEUE','project':'Project','direction':'Direction',
         'status':'Status','result':'Result','ready':'Ready','open_folder':'Open folder',
-        'convert_queue':'Convert queue','footnote':'Original media is linked, not copied; Graphic clips generate PNGs beside the project. FC → PR is experimental: read the report and check it in Premiere.',
+        'convert_queue':'Convert queue','footnote':'Original media is linked, not copied. Simple Graphic text becomes an editable title; unsupported Graphics generate PNGs. FC → PR is experimental: verify in Premiere.',
         'state_pending':'Pending','state_running':'Converting…','state_done':'Done','state_error':'Error','dash':'—',
         'count_zero':'0 projects','count_projects':'{n} projects','count_one':'{n} project','count_few':'{n} projects',
         'added':'Added to queue: {n}','queue_cleared':'Queue cleared','folder_error_title':'Folder unavailable',
@@ -91,7 +92,8 @@ TEXT = {
         'shortcut_summary_default':'Conversion complete. See the report for transferred shortcuts and warnings.',
         'dir_pr_fc':'PR → FC','dir_fc_pr':'FC → PR · experimental',
         'reverse_heading':'FC → PR SETTINGS · {name}',
-        'reverse_note':'Direct FC → PR needs no populated Premiere project; an empty shell is optional. Graphic text becomes a raster PNG, not an editable title. Verify the result in Premiere Pro.',
+        'reverse_note':'Direct FC → PR needs no populated Premiere project; an empty shell is optional. Simple static Graphic text becomes an editable title; complex cases still use PNG. Verify the result in Premiere Pro.',
+        'raster_checkbox':'Use PNG for Graphic (compatibility mode; text is not editable)',
         'shell_label':'Empty shell (optional)',
         'shell_placeholder':'Empty .prproj from your version, optional',
         'choose_shell_project':'Choose an empty Premiere shell (optional)',
@@ -378,6 +380,11 @@ class MainWindow(QMainWindow):
         self.shell_btn.clicked.connect(self.choose_shell)
         self.shell_edit.textChanged.connect(
             lambda value: self.reverse_field_changed('shell', value))
+        self.raster_checkbox = QCheckBox()
+        self.raster_checkbox.toggled.connect(
+            lambda checked: self.reverse_field_changed('graphic_mode',
+                                                        'png' if checked else 'native'))
+        reverse_layout.addWidget(self.raster_checkbox)
         self.reverse_panel.hide()
         root.addWidget(self.reverse_panel)
 
@@ -461,6 +468,7 @@ class MainWindow(QMainWindow):
         self.shell_edit.setPlaceholderText(self.t('shell_placeholder'))
         self.shell_btn.setText(self.t('browse'))
         self.reverse_note.setText(self.t('reverse_note'))
+        self.raster_checkbox.setText(self.t('raster_checkbox'))
         self.open_btn.setText(self.t('open_folder'))
         self.run_btn.setText(self.t('convert_queue'))
         self.footnote_label.setText(self.t('footnote'))
@@ -522,7 +530,7 @@ class MainWindow(QMainWindow):
                 continue
             self.files.append({
                 'path': str(path), 'direction': direction,
-                'shell': '', 'state': 'pending',
+                'shell': '', 'graphic_mode': 'native', 'state': 'pending',
                 'output': '', 'error': '',
             })
             added.append(len(self.files) - 1)
@@ -582,9 +590,10 @@ class MainWindow(QMainWindow):
                 value = record.get(field, '')
                 if edit.text() != value:
                     edit.setText(value)
+            self.raster_checkbox.setChecked(record.get('graphic_mode') == 'png')
         finally:
             self._loading_reverse = False
-        for widget in (self.shell_edit, self.shell_btn):
+        for widget in (self.shell_edit, self.shell_btn, self.raster_checkbox):
             widget.setEnabled(not self.busy)
 
     def reverse_field_changed(self, field, value):

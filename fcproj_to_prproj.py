@@ -386,10 +386,13 @@ def main() -> int:
     parser.add_argument('input', type=Path, help='FilmCraft .fcproj JSON project')
     parser.add_argument('output', type=Path, nargs='?', help='New Premiere .prproj output')
     parser.add_argument('--shell', type=Path, help='Optional empty Premiere project for build version strings')
+    parser.add_argument('--graphics', choices=('native', 'png'), default='native',
+                        help='Static Graphic text as editable native titles (default) or PNGs')
     args = parser.parse_args()
     from reverse_project import convert_reverse_project
     output = args.output or args.input.with_suffix('.prproj')
-    report, warnings = convert_reverse_project(args.input, output, shell=args.shell)
+    report, warnings = convert_reverse_project(args.input, output, shell=args.shell,
+                                                graphic_mode=args.graphics)
     print(f'Created {output}\nCreated {report}\n' + warnings[0])
     if len(warnings) > 1:
         print(f'Report messages: {len(warnings)-1}')

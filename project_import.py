@@ -172,5 +172,6 @@ def convert_queued_project(record: dict, output_dir: Path,
     if shell is not None and not shell.is_file():
         raise ValueError('Указанная пустая оболочка Premiere не найдена.')
     output = next_output_path(output_dir, output_stem(source), '.prproj')
-    _, messages = convert_reverse_project(source, output, language, shell=shell)
+    _, messages = convert_reverse_project(source, output, language, shell=shell,
+                                          graphic_mode=record.get('graphic_mode', 'native'))
     return output, len(messages)

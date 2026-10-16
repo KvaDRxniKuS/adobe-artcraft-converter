@@ -79,12 +79,16 @@ class MixedQueueUITests(unittest.TestCase):
         self.window.add_paths([str(self.source), str(second)])
         self.window.table.setCurrentCell(0, 0)
         self.window.shell_edit.setText(str(self.shell))
+        self.window.raster_checkbox.setChecked(True)
         self.window.table.setCurrentCell(1, 0)
         self.assertEqual(self.window.shell_edit.text(), '')
+        self.assertFalse(self.window.raster_checkbox.isChecked())
         self.window.language_combo.setCurrentIndex(1)
         self.assertEqual(self.window.files[0]['shell'], str(self.shell))
+        self.assertEqual(self.window.files[0]['graphic_mode'], 'png')
         self.window.table.setCurrentCell(0, 0)
         self.assertEqual(self.window.shell_edit.text(), str(self.shell))
+        self.assertTrue(self.window.raster_checkbox.isChecked())
 
     def test_no_shell_required_and_no_extra_window(self):
         self.window.add_paths([str(self.premiere), str(self.source)])

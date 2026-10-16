@@ -30,6 +30,8 @@ SHA_PATTERN = re.compile(r'[a-fA-F0-9]{40}\Z')
 SAFE_PY_NAME = re.compile(r'[A-Za-z0-9_.-]+\.py\Z', re.IGNORECASE)
 REQUIRED_FILES = frozenset({
     'desktop_app.py', 'prproj_to_fcproj.py', 'fcproj_to_prproj.py',
+    'direct_fc_to_prproj.py', 'project_import.py', 'reverse_project.py',
+    'graphic_raster.py', 'premiere_seed.py', 'premiere_text.py', 'premiere_text_seed.py',
     'shortcut_converter.py', 'requirements.txt',
     'FilmCraft_Shortcuts_Template.json', 'Premiere_Shortcuts_Template.kys',
 })

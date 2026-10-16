@@ -7,6 +7,7 @@ Premiere compatibility still requires validation in Premiere Pro.
 """
 from __future__ import annotations
 
+import base64
 import copy
 import gzip
 import json
@@ -21,6 +22,8 @@ from pathlib import Path
 from fcproj_to_prproj import TICKS, same_file
 from graphic_raster import render_graphic
 from premiere_seed import load_seed_xml
+from premiere_text import NativeTextUnsupported, create_native_text
+from premiere_text_seed import load_text_seed_xml
 from prproj_to_fcproj import Converter as ForwardConverter
 
 # These records describe the project shell; all media/timeline records are
@@ -32,7 +35,9 @@ SHELL_RECORDS = frozenset({
     'AudioSettings', 'VideoCompileSettings', 'AudioCompileSettings',
 })
 GUID = re.compile(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z')
-IDENTITY_TAGS = frozenset({'ID', 'ClipID', 'FileKey', 'ImplementationID',
+# ImplementationID is a shared importer type ID, not an object identity:
+# file-backed media and synthetic titles each use a specific constant GUID.
+IDENTITY_TAGS = frozenset({'ID', 'ClipID', 'FileKey',
                            'DefMappingID', 'PreviewFormatIdentifier'})
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.aif', '.aiff', '.m4a', '.flac', '.aac', '.ogg'}
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif', '.webp'}
@@ -238,7 +243,11 @@ class GraphBuilder:
 class DirectWriter:
     """Build native object links directly from the FC project, without PR inputs."""
 
-    def __init__(self, fc_path: Path, shell_path: Path | None = None):
+    def __init__(self, fc_path: Path, shell_path: Path | None = None,
+                 graphic_mode: str = 'native'):
+        if graphic_mode not in ('native', 'png'):
+            raise ValueError('Режим Graphic должен быть native или png.')
+        self.graphic_mode = graphic_mode
         self.fc_path = Path(fc_path)
         self.shell_path = Path(shell_path) if shell_path else None
         self.fc = json.loads(self.fc_path.read_text(encoding='utf-8-sig'))
@@ -266,6 +275,7 @@ class DirectWriter:
         self.media_needed_span: dict[str, int] = {}
         self.generated_assets: dict[Path, bytes] = {}
         self.output_path: Path | None = None
+        self.text_template: GraphIndex | None = None
 
     @staticmethod
     def _set(node: ET.Element, path: str, value: object) -> None:
@@ -399,7 +409,7 @@ class DirectWriter:
         if not any(field is not None for field in paths):
             self._set(media, 'RelativePath', path)
         self._set(media, 'Title', name)
-        self._set(media, 'ImplementationID', str(uuid.uuid4()))
+        # Keep the file importer GUID from the Premiere fixture; FileKey is unique.
         self._set(media, 'FileKey', str(uuid.uuid4()))
         if video:
             vs = next(value for value in project_item.values() if value.tag == 'VideoStream')
@@ -493,18 +503,76 @@ class DirectWriter:
         self.warnings.extend(f'«{name}»: {message}' for message in messages)
         return self.media[pseudo_id]
 
+    def _make_native_text_clip(self, item: dict, clip: dict, effect: dict,
+                               width: int, height: int, frame_period: int,
+                               start: int, duration: int, source_in: int) -> ET.Element:
+        """Clone a Type-tool title graph and write an editable Source Text blob."""
+        native = create_native_text(effect, item['kind']['Graphic'], width, height)
+        if self.text_template is None:
+            self.text_template = GraphIndex(ET.fromstring(load_text_seed_xml()))
+        template = self.text_template
+        occurrence = next(el for el in template.root if el.tag == 'VideoClipTrackItem')
+        copied = self.graph.clone(template, occurrence)
+        track_item = copied[occurrence]
+        sub_template = template.from_path(occurrence, './ClipTrackItem/SubClip')
+        sub = copied[sub_template]
+        placed = copied[template.from_path(sub_template, 'Clip')]
+        master_template = template.from_path(sub_template, 'MasterClip')
+        master = copied[master_template]
+        source_clip = copied[template.from_path(master_template, './Clips/Clip')]
+        name = str(clip.get('name') or item.get('name') or 'Graphic text')
+        self._set(sub, 'Name', name)
+        self._set(master, 'Name', name)
+        self._set(track_item, './ClipTrackItem/TrackItem/Start', start)
+        self._set(track_item, './ClipTrackItem/TrackItem/End', start + duration)
+        self._set(track_item, 'FrameRect', f'0,0,{width},{height}')
+        self._set(placed, './Clip/InPoint', source_in)
+        self._set(placed, './Clip/OutPoint', source_in + duration)
+        self._set(source_clip, './Clip/OutPoint', source_in + duration)
+        for node in copied.values():
+            if node.tag == 'VideoStream':
+                self._set(node, 'FrameRate', frame_period)
+                self._set(node, 'FrameRect', f'0,0,{width},{height}')
+            elif node.tag == 'ClipLoggingInfo':
+                self._set(node, 'ClipName', name)
+                self._set(node, 'MediaFrameRate', frame_period)
+            elif node.tag == 'Media':
+                # This is Premiere's *synthetic graphic importer* identifier,
+                # not a per-file identity. GraphBuilder randomizes GUID fields.
+                self._set(node, 'ImplementationID', '42008e7a-de6f-4270-96de-7e287abb9b4b')
+            elif node.tag == 'ArbVideoComponentParam':
+                blob = node.find('StartKeyframeValue')
+                if blob is None:
+                    raise ValueError('Premiere text seed lacks Source Text payload')
+                blob.text = base64.b64encode(native.payload).decode('ascii')
+                blob.set('BinaryHash', str(uuid.uuid4()))
+            elif node.tag in ('PointComponentParam', 'VideoComponentParam'):
+                try:
+                    param_id = int(node.findtext('ParameterID') or '')
+                except ValueError:
+                    continue
+                if param_id in native.parameters:
+                    start_key = node.find('StartKeyframe')
+                    if start_key is None or not start_key.text:
+                        raise ValueError(f'Premiere text seed lacks parameter {param_id}')
+                    fields = start_key.text.split(',')
+                    fields[1] = native.parameters[param_id]
+                    start_key.text = ','.join(fields)
+            elif node.tag == 'VideoFilterComponent':
+                self._set(node, './Component/InstanceName', name)
+        self.warnings.extend(f'«{name}»: {message}' for message in native.warnings)
+        return track_item
+
     def _make_clip(self, kind: str, clip: dict, sequence_name: str,
-                   width: int, height: int) -> ET.Element:
+                   width: int, height: int, frame_period: int) -> ET.Element:
         raw_id = str(clip.get('item'))
         media_id = self._item_key(clip.get('item'))
         source = self.items.get(media_id)
         is_graphic = source is not None and 'Graphic' in source.get('kind', {})
         handle = self.media.get(media_id)
-        if handle is None and is_graphic:
-            if kind != 'video':
-                raise ValueError(f'«{sequence_name}»: Graphic {raw_id} нельзя поместить на аудиодорожку.')
-            handle = self._make_graphic_media(media_id, source, clip, width, height)
-        if handle is None:
+        if is_graphic and kind != 'video':
+            raise ValueError(f'«{sequence_name}»: Graphic {raw_id} нельзя поместить на аудиодорожку.')
+        if handle is None and not is_graphic:
             clip_name = clip.get('name') or 'Без имени'
             if source is None:
                 raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
@@ -518,9 +586,7 @@ class DirectWriter:
             raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
                              f'элемент {raw_id} «{source.get("name", "") }» с kind={kinds}; '
                              'FC → PR пока не поддерживает этот тип источника.')
-        source_id = handle.video_source if kind == 'video' else handle.audio_source
-        if not source_id:
-            raise ValueError(f'«{sequence_name}»: медиа «{handle.name}» не содержит {kind}-потока.')
+        clip_name = str(clip.get('name') or (handle.name if handle else source.get('name')))
         start = int(clip.get('start') or 0)
         duration = int(clip.get('duration') or 0)
         source_in = int(clip.get('source_in') or 0)
@@ -529,14 +595,14 @@ class DirectWriter:
             raise ValueError(f'«{sequence_name}»: отрицательные тайминги, нулевая длительность '
                              'или обратное воспроизведение не поддерживаются.')
         if speed != 1:
-            self.warnings.append(f'«{sequence_name}» / «{clip.get("name", handle.name)}»: '
+            self.warnings.append(f'«{sequence_name}» / «{clip_name}»: '
                                  f'изменение скорости {speed:g} не перенесено, проверьте тайминг.')
         if clip.get('enabled') is False:
-            self.warnings.append(f'«{sequence_name}» / «{clip.get("name", handle.name)}»: '
+            self.warnings.append(f'«{sequence_name}» / «{clip_name}»: '
                                  'отключённый клип записан активным.')
         if (clip.get('markers') or clip.get('frame_hold') or clip.get('multicam')
                 or clip.get('essential') or clip.get('scale_to_frame')):
-            self.warnings.append(f'«{sequence_name}» / «{clip.get("name", handle.name)}»: '
+            self.warnings.append(f'«{sequence_name}» / «{clip_name}»: '
                                  'специальные параметры или маркеры клипа не перенесены.')
         defaults = {effect['effect']: effect.get('params')
                     for effect in (ForwardConverter.intrinsic_video(width, height)
@@ -549,9 +615,30 @@ class DirectWriter:
                         or effect.get('params') != defaults[effect['effect']]
                         or effect.get('enabled') is False)]
         if effects:
-            self.warnings.append(f'«{sequence_name}» / «{clip.get("name", handle.name)}»: '
+            self.warnings.append(f'«{sequence_name}» / «{clip_name}»: '
                                  f'{len(effects)} эффект(ов) или изменённых параметров '
                                  'не перенесено.')
+        if is_graphic:
+            if self.graphic_mode == 'native':
+                layers = [effect for effect in (clip.get('effects') or [])
+                          if isinstance(effect, dict) and effect.get('effect') == 'graphic_text']
+                if len(layers) == 1:
+                    try:
+                        return self._make_native_text_clip(source, clip, layers[0],
+                                                           width, height, frame_period,
+                                                           start, duration, source_in)
+                    except NativeTextUnsupported as exc:
+                        self.warnings.append(f'«{clip_name}»: нативный текст недоступен ({exc}); '
+                                             'использован PNG.')
+                elif len(layers) > 1:
+                    self.warnings.append(f'«{clip_name}»: несколько слоёв текста пока '
+                                         'сохраняются как PNG.')
+            else:
+                self.warnings.append(f'«{clip_name}»: выбран режим совместимости PNG.')
+            handle = self._make_graphic_media(media_id, source, clip, width, height)
+        source_id = handle.video_source if kind == 'video' else handle.audio_source
+        if not source_id:
+            raise ValueError(f'«{sequence_name}»: медиа «{handle.name}» не содержит {kind}-потока.')
         prototype = self.graph.occurrence_templates[kind]
         copied = self.graph.clone(self.graph.template, prototype, {
             ('ObjectURef', self.graph.media_master.get('ObjectUID')): handle.master_uid,
@@ -655,7 +742,7 @@ class DirectWriter:
                     if int(clip.get('start') or 0) < previous_end:
                         raise ValueError(f'«{name}»: клипы перекрываются на одной дорожке {kind} '
                                          f'{track_index + 1}; нативная запись такого перекрытия не поддерживается.')
-                    native = self._make_clip(kind, clip, name, width, height)
+                    native = self._make_clip(kind, clip, name, width, height, frame_rate)
                     ET.SubElement(items, 'TrackItem', {'Index': str(len(items)),
                                                       'ObjectRef': native.get('ObjectID')})
                     previous_end = int(clip.get('start') or 0) + int(clip.get('duration') or 0)
@@ -754,11 +841,9 @@ class DirectWriter:
         if guid is not None:
             guid.text = str(uuid.uuid4())
         # Each project item is authored once, independently of clip counts.
-        media_count = 0
         for item_id, item in self.items.items():
             if 'Media' in item.get('kind', {}) and self._media_path(item):
                 self._make_media(item_id, item)
-                media_count += 1
         for item_id, item in self.items.items():
             if 'Sequence' in item.get('kind', {}):
                 self._create_sequence(item_id, item)
@@ -789,6 +874,7 @@ class DirectWriter:
         for plan in self.plans:
             self._populate_sequence(plan)
         self.graph.remove_orphans()
+        media_count = len(self.graph.output.findall('Media'))
         xml = ET.tostring(self.graph.output, encoding='utf-8', xml_declaration=True)
         try:
             ET.fromstring(xml)
@@ -818,7 +904,6 @@ class DirectWriter:
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
-        media_count += len(self.generated_assets)
         self.warnings.insert(0, f'Созданы {len(sequences)} последовательностей и '
                                 f'{media_count} медиа-объектов без заполненного эталона Premiere.')
         return self.warnings

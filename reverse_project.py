@@ -19,9 +19,10 @@ REPORT_TEXT = {
                  'создаются из FilmCraft без заполненного Premiere-эталона. '
                  'Эффекты, переходы и особые параметры могут не переноситься. '
                  'Открытие результата в Premiere Pro необходимо проверить.'),
-        'media': ('Исходные медиафайлы не копируются. Для Graphic создаются PNG рядом '
-                  'с результатом — сохраните их вместе с проектом при переносе. '
-                  'При необходимости перепривяжите медиа в Premiere Pro.'),
+        'media': ('Исходные медиафайлы не копируются. Простой статичный Graphic-текст '
+                  'переносится как нативный титр; при PNG fallback файлы сохраняются рядом '
+                  'с проектом — переносите их вместе. Шрифты должны быть установлены в '
+                  'Premiere; при необходимости перепривяжите исходные медиа.'),
     },
     'en': {
         'title': 'FilmCraft → Premiere conversion report',
@@ -32,9 +33,10 @@ REPORT_TEXT = {
                  'from FilmCraft without a populated Premiere reference. Effects, '
                  'transitions and special properties may not transfer. Verify the '
                  'result by opening it in Premiere Pro. Diagnostics below may be in Russian.'),
-        'media': ('Original media files are not copied. Generated Graphic PNGs are saved '
-                  'next to the project; keep them together when moving it. Relink media '
-                  'in Premiere Pro if needed.'),
+        'media': ('Original media files are not copied. Simple static Graphic text is '
+                  'encoded as a native title; any fallback Graphic PNGs are saved beside '
+                  'the project, so move them together. Install the source fonts in '
+                  'Premiere and relink original media if needed.'),
     },
 }
 
@@ -68,7 +70,8 @@ def reverse_report_text(source: Path, output: Path, warnings: list[str],
 
 
 def convert_reverse_project(source: Path, output: Path, language: str = 'ru',
-                            shell: Path | None = None) -> tuple[Path, list[str]]:
+                            shell: Path | None = None,
+                            graphic_mode: str = 'native') -> tuple[Path, list[str]]:
     """Write a new project and its report; no populated Premiere project needed."""
     source, output = Path(source), Path(output)
     shell = Path(shell) if shell else None
@@ -78,7 +81,7 @@ def convert_reverse_project(source: Path, output: Path, language: str = 'ru',
            for item in (source, shell) if item is not None):
         raise ValueError('Результат или отчёт не может перезаписать входной проект или пустую оболочку.')
 
-    warnings = DirectWriter(source, shell).write(output)
+    warnings = DirectWriter(source, shell, graphic_mode=graphic_mode).write(output)
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(

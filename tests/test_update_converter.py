@@ -154,7 +154,10 @@ class UpdaterTests(unittest.TestCase):
                          (repository / 'premiere_seed.py').read_bytes())
         self.assertTrue((output / 'direct_fc_to_prproj.py').is_file())
         self.assertTrue((output / 'graphic_raster.py').is_file())
+        self.assertTrue((output / 'premiere_text.py').is_file())
+        self.assertTrue((output / 'premiere_text_seed.py').is_file())
         self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))
+        self.assertIn('flatbuffers', (output / 'requirements.txt').read_text(encoding='utf-8'))
 
     def test_archive_rejects_duplicate_and_symlink_and_bad_python(self):
         archive = self.base / 'source.zip'

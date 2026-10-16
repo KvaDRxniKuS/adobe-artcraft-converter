@@ -3,6 +3,7 @@ import gzip
 import json
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +11,11 @@ from project_import import (FC_TO_PR, PR_TO_FC, ProjectTypeError,
                             convert_queued_project, detect_project_direction,
                             next_output_path)
 from test_reverse_writer import REFERENCE, SHELL, graphic_text_clip
+
+try:
+    import flatbuffers  # noqa: F401
+except ImportError:
+    flatbuffers = None
 
 
 class ProjectImportTests(unittest.TestCase):
@@ -96,11 +102,8 @@ class ProjectImportTests(unittest.TestCase):
         self.assertEqual(self.premiere.read_text(encoding='utf-8'), REFERENCE)
         self.assertEqual(self.shell.read_text(encoding='utf-8'), SHELL)
 
-    def test_fc_graphic_in_txt_input_generates_png_in_queue_output(self):
-        try:
-            from PIL import Image  # noqa: F401 - import checks the installed runtime dependency
-        except ImportError:
-            self.skipTest('Pillow is not installed')
+    @unittest.skipIf(flatbuffers is None, 'flatbuffers is not installed')
+    def test_fc_graphic_in_txt_input_creates_native_title_in_shared_queue(self):
         project = json.loads(self.filmcraft.read_text(encoding='utf-8'))
         project['project']['items']['314'] = {'id': 314, 'kind': {
             'Graphic': {'width': 320, 'height': 180, 'rate': {'num': 25, 'den': 1}},
@@ -113,10 +116,32 @@ class ProjectImportTests(unittest.TestCase):
         output, _ = convert_queued_project({'path': str(source), 'direction': FC_TO_PR},
                                            self.output_dir)
         self.assertTrue(output.is_file())
-        self.assertEqual(len(list(self.output_dir.glob('*_graphic_*.png'))), 1)
+        self.assertEqual(len(list(self.output_dir.glob('*_graphic_*.png'))), 0)
+        root = ET.fromstring(gzip.decompress(output.read_bytes()))
+        self.assertEqual([node.findtext('MatchName') for node in root.findall('VideoFilterComponent')],
+                         ['AE.ADBE Text'])
         report = output.with_name(output.stem + '_conversion_report.md')
-        self.assertIn('растровый PNG', report.read_text(encoding='utf-8'))
+        self.assertIn('Нативный текст', report.read_text(encoding='utf-8'))
         self.assertEqual(json.loads(source.read_text(encoding='utf-8')), project)
+
+    def test_queue_can_force_graphic_png_mode_for_compatibility(self):
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            self.skipTest('Pillow is not installed')
+        project = json.loads(self.filmcraft.read_text(encoding='utf-8'))
+        project['project']['items']['314'] = {'id': 314, 'kind': {
+            'Graphic': {'width': 320, 'height': 180, 'rate': {'num': 25, 'den': 1}},
+        }}
+        project['project']['items']['1']['kind']['Sequence']['video_tracks'] = [
+            {'items': [graphic_text_clip(315, 'Резерв', 0)]}]
+        self.filmcraft.write_text(json.dumps(project), encoding='utf-8')
+        output, _ = convert_queued_project(
+            {'path': str(self.filmcraft), 'direction': FC_TO_PR, 'graphic_mode': 'png'},
+            self.output_dir)
+        self.assertEqual(len(list(self.output_dir.glob('*_graphic_*.png'))), 1)
+        root = ET.fromstring(gzip.decompress(output.read_bytes()))
+        self.assertEqual(len(root.findall('ArbVideoComponentParam')), 0)
 
     def test_optional_missing_shell_rejected_without_touching_fc(self):
         with self.assertRaisesRegex(ValueError, 'оболочка'):

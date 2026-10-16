@@ -1,8 +1,10 @@
 """Structural FC → PR checks; only Premiere Pro can verify actual compatibility."""
+import base64
 import contextlib
 import gzip
 import io
 import json
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -19,6 +21,7 @@ from fcproj_to_prproj import NativeWriter, TICKS, main as reverse_cli, same_file
 from prproj_to_fcproj import Converter
 from reverse_project import (ReportWriteError, convert_reverse_project,
                              reverse_report_path)
+from test_premiere_text import TextView, flatbuffers
 
 # Tiny hand-written project records for detection and legacy API tests only.
 REFERENCE = '''<PremiereData>
@@ -123,7 +126,7 @@ class DirectWriterTests(unittest.TestCase):
     def save_fc(self):
         self.source.write_text(json.dumps(self.document), encoding='utf-8')
 
-    def add_graphic(self, *, clips=1):
+    def add_graphic(self, *, clips=1, raster=False):
         self.document['project']['items']['314'] = {
             'id': 314, 'name': 'Graphic canvas', 'kind': {'Graphic': {
                 'width': 320, 'height': 180, 'rate': {'num': 25, 'den': 1},
@@ -132,6 +135,10 @@ class DirectWriterTests(unittest.TestCase):
         track = self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][2]
         track['items'] = [graphic_text_clip(315 + i, 'Пример' if i == 0 else 'Second',
                                            i * 2 * TICKS) for i in range(clips)]
+        if raster:
+            # A shadow is not supported by the editable-text subset.
+            for clip in track['items']:
+                clip['effects'][0]['params']['shadow'] = {'value': {'Bool': True}}
         self.save_fc()
 
     @staticmethod
@@ -201,9 +208,84 @@ class DirectWriterTests(unittest.TestCase):
         self.assertIsNone(stream.find('IgnoreAlpha'))
         self.assertEqual(len(root.findall('VideoClipTrackItem')), 4)
 
-    @unittest.skipIf(Image is None, 'Pillow is not installed')
-    def test_graphic_text_exports_per_clip_png_without_losing_timeline(self):
+    @unittest.skipIf(flatbuffers is None, 'flatbuffers is not installed')
+    def test_static_graphic_text_is_native_per_clip_with_unicode_timing_and_position(self):
         self.add_graphic(clips=2)
+        second = self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][2]['items'][1]
+        second['source_in'] = TICKS // 4
+        self.save_fc()
+        report, warnings = convert_reverse_project(self.source, self.output)
+        root = self.read_root(self.output)
+        index = GraphIndex(root)
+        self.assertEqual(len(root.findall('VideoClipTrackItem')), 6)
+        self.assertEqual(len(root.findall('Media')), 4)
+        self.assertEqual(len(list(self.base.glob('result_graphic_*.png'))), 0)
+        native_media = [node for node in root.findall('Media')
+                        if node.findtext('FilePath') == '1196574294']
+        self.assertEqual(len(native_media), 2)
+        self.assertTrue(all(node.findtext('ImplementationID') ==
+                            '42008e7a-de6f-4270-96de-7e287abb9b4b'
+                            for node in native_media))
+        file_media = [node for node in root.findall('Media') if node not in native_media]
+        self.assertTrue(all(node.findtext('ImplementationID') ==
+                            '1fa18bfa-255c-44b1-ad73-56bcd99fceaf'
+                            for node in file_media))
+        self.assertEqual([node.findtext('MatchName') for node in root.findall('VideoFilterComponent')],
+                         ['AE.ADBE Text', 'AE.ADBE Text'])
+        payloads = root.findall('ArbVideoComponentParam')
+        self.assertEqual(len(payloads), 2)
+        texts = [TextView(base64.b64decode(node.findtext('StartKeyframeValue'))).title()[2]
+                 for node in payloads]
+        self.assertEqual(texts, ['Пример', 'Second'])
+        self.assertEqual(len({node.find('StartKeyframeValue').get('BinaryHash')
+                              for node in payloads}), 2)
+        occurrences = [node for node in root.findall('VideoClipTrackItem')
+                       if index.from_path(node, './ClipTrackItem/SubClip').findtext('Name')
+                       == 'Generated title']
+        occurrences.sort(key=lambda node: int(node.findtext('./ClipTrackItem/TrackItem/Start')))
+        self.assertEqual([(int(node.findtext('./ClipTrackItem/TrackItem/Start')),
+                           int(node.findtext('./ClipTrackItem/TrackItem/End')))
+                          for node in occurrences], [(0, TICKS), (2*TICKS, 3*TICKS)])
+        placed = [index.from_path(index.from_path(node, './ClipTrackItem/SubClip'), 'Clip')
+                  for node in occurrences]
+        self.assertEqual([(int(node.findtext('./Clip/InPoint')),
+                           int(node.findtext('./Clip/OutPoint'))) for node in placed],
+                         [(0, TICKS), (TICKS//4, TICKS + TICKS//4)])
+        self.assertTrue(all(node.findtext('FrameRect') == '0,0,1280,720'
+                            for node in occurrences))
+        position = [node.findtext('StartKeyframe').split(',')[1]
+                    for node in root.findall('PointComponentParam')
+                    if node.findtext('ParameterID') == '3']
+        self.assertEqual(position, ['0.05:0.133333333', '0.05:0.133333333'])
+        # Project-shell column IDs are the only legacy unresolved references.
+        for node in root:
+            if node.tag == 'Project':
+                continue
+            for child in node.iter():
+                if child.get('ObjectRef'):
+                    self.assertIn(child.get('ObjectRef'), index.by_id)
+                if child.get('ObjectURef'):
+                    self.assertIn(child.get('ObjectURef'), index.by_uid)
+        converted = Converter(self.output).convert(self.base / 'native_roundtrip.fcproj')
+        seq = next(item['kind']['Sequence'] for item in converted['project']['items'].values()
+                   if item.get('name') == 'Main' and 'Sequence' in item['kind'])
+        self.assertEqual([(clip['start'], clip['duration'])
+                          for clip in seq['video_tracks'][2]['items']],
+                         [(0, TICKS), (2*TICKS, TICKS)])
+        self.assertIn('Нативный текст', report.read_text(encoding='utf-8'))
+        self.assertTrue(any('Нативный текст' in message for message in warnings))
+
+    @unittest.skipIf(flatbuffers is None, 'flatbuffers is not installed')
+    def test_native_graphic_does_not_require_pillow(self):
+        self.add_graphic()
+        with patch('direct_fc_to_prproj.render_graphic',
+                   side_effect=AssertionError('Raster path must not be used')):
+            DirectWriter(self.source).write(self.output)
+        self.assertEqual(len(self.read_root(self.output).findall('ArbVideoComponentParam')), 1)
+
+    @unittest.skipIf(Image is None, 'Pillow is not installed')
+    def test_unsupported_graphic_style_exports_per_clip_png_without_losing_timeline(self):
+        self.add_graphic(clips=2, raster=True)
         report, warnings = convert_reverse_project(self.source, self.output)
         pngs = list(self.base.glob('result_graphic_*.png'))
         self.assertEqual(len(pngs), 2)
@@ -237,8 +319,18 @@ class DirectWriterTests(unittest.TestCase):
         self.assertFalse(any('graphic_text' in m and 'не перенесено' in m for m in warnings))
 
     @unittest.skipIf(Image is None, 'Pillow is not installed')
-    def test_generated_graphic_assets_are_removed_if_project_write_fails(self):
+    def test_without_flatbuffers_supported_text_falls_back_to_png(self):
         self.add_graphic()
+        with patch.dict(sys.modules, {'flatbuffers': None}):
+            warnings = DirectWriter(self.source).write(self.output)
+        self.assertEqual(len(list(self.base.glob('result_graphic_*.png'))), 1)
+        self.assertEqual(len(self.read_root(self.output).findall('ArbVideoComponentParam')), 0)
+        self.assertTrue(any('flatbuffers' in message and 'PNG' in message
+                            for message in warnings))
+
+    @unittest.skipIf(Image is None, 'Pillow is not installed')
+    def test_generated_graphic_assets_are_removed_if_project_write_fails(self):
+        self.add_graphic(raster=True)
         self.output.write_bytes(b'keep earlier output')
         with patch('direct_fc_to_prproj.os.replace', side_effect=OSError('disk full')):
             with self.assertRaisesRegex(OSError, 'disk full'):
@@ -248,7 +340,7 @@ class DirectWriterTests(unittest.TestCase):
         self.assertFalse(list(self.base.glob('*.tmp')))
 
     def test_graphic_missing_dependency_has_an_actionable_error(self):
-        self.add_graphic()
+        self.add_graphic(raster=True)
         with patch('direct_fc_to_prproj.render_graphic',
                    side_effect=RuntimeError('Установите Pillow из requirements.txt')):
             with self.assertRaisesRegex(RuntimeError, 'Pillow'):
@@ -327,6 +419,17 @@ class DirectWriterTests(unittest.TestCase):
             self.assertEqual(reverse_cli(), 0)
         self.assertEqual(len(self.read_root(self.output).findall('Sequence')), 2)
         self.assertTrue(reverse_report_path(self.output).is_file())
+
+    @unittest.skipIf(Image is None, 'Pillow is not installed')
+    def test_cli_png_mode_keeps_compatibility_output(self):
+        self.add_graphic()
+        with patch('sys.argv', ['fcproj_to_prproj.py', str(self.source), str(self.output),
+                                '--graphics', 'png']), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(reverse_cli(), 0)
+        self.assertEqual(len(list(self.base.glob('result_graphic_*.png'))), 1)
+        self.assertEqual(len(self.read_root(self.output).findall('ArbVideoComponentParam')), 0)
+        self.assertIn('режим совместимости PNG',
+                      reverse_report_path(self.output).read_text(encoding='utf-8'))
 
     def test_empty_sequence_needs_no_media_or_reference(self):
         self.document['project']['items'] = {
