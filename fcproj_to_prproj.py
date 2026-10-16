@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Best-effort native Premiere project writer from FilmCraft JSON.
+"""FilmCraft → Premiere CLI and legacy reference-aligned writer.
 
-This first writer uses a populated Premiere project as an object-graph template.
-It is deliberately strict: it writes only when the FilmCraft sequences/tracks/clips
-can be aligned to the template graph. It never emits FCP XML or fabricates a graph
-that Premiere has not validated.
+The command-line entry point now uses DirectWriter, which generates a new graph
+from FilmCraft references without a populated Premiere project. NativeWriter is
+retained for callers of the earlier experimental reference-based API.
 """
 from __future__ import annotations
 import argparse
@@ -383,22 +382,17 @@ class NativeWriter:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Best-effort FilmCraft JSON → native Premiere .prproj writer')
+    parser = argparse.ArgumentParser(description='FilmCraft JSON → native Premiere .prproj (experimental)')
     parser.add_argument('input', type=Path, help='FilmCraft .fcproj JSON project')
-    parser.add_argument('output', type=Path, nargs='?', help='Native Premiere .prproj output')
-    parser.add_argument('--reference', type=Path, required=True, help='Populated Premiere .prproj used as the native graph template')
-    parser.add_argument('--shell', type=Path, required=True, help='Empty Premiere .prproj shell for build/project metadata')
+    parser.add_argument('output', type=Path, nargs='?', help='New Premiere .prproj output')
+    parser.add_argument('--shell', type=Path, help='Optional empty Premiere project for build version strings')
     args = parser.parse_args()
+    from reverse_project import convert_reverse_project
     output = args.output or args.input.with_suffix('.prproj')
-    writer = NativeWriter(args.input, args.reference, args.shell)
-    warnings = writer.write(output)
-    report = output.with_name(output.stem + '_conversion_report.md')
-    report.write_text('# Отчёт FilmCraft → native Premiere\n\n'
-                      f'- FilmCraft: `{args.input.name}`\n- Premiere graph reference: `{args.reference.name}`\n- Premiere shell: `{args.shell.name}`\n- Результат: `{output.name}`\n\n'
-                      '## Результат и ограничения\n\n' + '\n'.join('- ' + x for x in warnings) + '\n', encoding='utf-8')
+    report, warnings = convert_reverse_project(args.input, output, shell=args.shell)
     print(f'Created {output}\nCreated {report}\n' + warnings[0])
-    if len(warnings) > 2:
-        print(f'Warnings: {len(warnings)-2}')
+    if len(warnings) > 1:
+        print(f'Report messages: {len(warnings)-1}')
     return 0
 
 

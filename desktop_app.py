@@ -28,8 +28,8 @@ TEXT = {
         'remove':'Удалить выбранные','clear':'Очистить очередь','output_folder':'ПАПКА ВЫВОДА','configurable':'настраивается',
         'output_placeholder':'Папка для результатов .fcproj и .prproj','browse':'Обзор…','queue':'ОЧЕРЕДЬ','project':'Проект','direction':'Направление',
         'status':'Статус','result':'Результат','ready':'Готов к работе','open_folder':'Открыть папку',
-        'convert_queue':'Конвертировать очередь','footnote':'Медиа не копируются. PR → FC переносит только поддерживаемые эффекты; FC → PR — экспериментальный writer по графу-эталону. Проверяйте результат и отчёт в целевом приложении.',
-        'state_pending':'Ожидает','state_setup':'Нужны шаблоны','state_running':'Конвертация…','state_done':'Готово','state_error':'Ошибка','dash':'—',
+        'convert_queue':'Конвертировать очередь','footnote':'Медиа не копируются. FC → PR создаёт граф без заполненного эталона, но результат экспериментальный: проверьте его в Premiere и прочтите отчёт.',
+        'state_pending':'Ожидает','state_running':'Конвертация…','state_done':'Готово','state_error':'Ошибка','dash':'—',
         'count_zero':'0 проектов','count_projects':'{n} проектов','count_one':'{n} проект','count_few':'{n} проекта',
         'added':'Добавлено в очередь: {n}','queue_cleared':'Очередь очищена','folder_error_title':'Папка недоступна',
         'processing':'Обработка {done} из {total}','converting':'Конвертация: {name}','done':'Готово: {name}',
@@ -51,12 +51,12 @@ TEXT = {
         'shortcut_summary_default':'Конвертация выполнена. См. отчёт для списка назначений и предупреждений.',
         'dir_pr_fc':'PR → FC','dir_fc_pr':'FC → PR · эксперим.',
         'reverse_heading':'ПАРАМЕТРЫ FC → PR · {name}',
-        'reverse_note':'Экспериментальный writer: для выбранного проекта укажите заполненный эталон Premiere с совпадающими последовательностями, дорожками и клипами, а также пустую оболочку. Результат обязательно проверяйте в Premiere Pro.',
-        'reference_label':'Эталон Premiere','shell_label':'Пустая оболочка Premiere',
-        'reference_placeholder':'Заполненный проект .prproj / XML','shell_placeholder':'Пустой проект .prproj вашей версии',
-        'choose_reference_project':'Выберите заполненный эталон Premiere','choose_shell_project':'Выберите пустую оболочку Premiere',
-        'no_reference':'Для «{name}» выберите существующий эталон Premiere.','no_shell':'Для «{name}» выберите существующую пустую оболочку Premiere.',
-        'templates_needed_title':'Не настроены проекты FC → PR','templates_needed':'Эти проекты пропущены:\n{details}\n\nВыберите строку и укажите эталон и оболочку. Остальные проекты будут обработаны.',
+        'reverse_note':'Прямой FC → PR не требует заполненного проекта Premiere. Пустая оболочка вашей версии необязательна (из неё берутся только строки версии). Проверьте результат в Premiere Pro.',
+        'shell_label':'Пустая оболочка (необязательно)',
+        'shell_placeholder':'Пустой .prproj вашей версии, необязательно',
+        'choose_shell_project':'Выберите пустую оболочку Premiere (необязательно)',
+        'no_shell':'Указанная пустая оболочка для «{name}» не найдена.',
+        'templates_needed_title':'Недоступна оболочка Premiere','templates_needed':'Эти проекты пропущены:\n{details}\n\nУдалите путь или выберите существующую оболочку. Остальные проекты будут обработаны.',
         'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — используйте отдельное окно','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
         'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
     },
@@ -68,8 +68,8 @@ TEXT = {
         'remove':'Remove selected','clear':'Clear queue','output_folder':'OUTPUT FOLDER','configurable':'configurable',
         'output_placeholder':'Output folder for .fcproj and .prproj','browse':'Browse…','queue':'QUEUE','project':'Project','direction':'Direction',
         'status':'Status','result':'Result','ready':'Ready','open_folder':'Open folder',
-        'convert_queue':'Convert queue','footnote':'Media is not copied. PR → FC transfers supported effects; FC → PR is an experimental reference-based writer. Review the report and verify the result in the destination app.',
-        'state_pending':'Pending','state_setup':'Set templates','state_running':'Converting…','state_done':'Done','state_error':'Error','dash':'—',
+        'convert_queue':'Convert queue','footnote':'Media is not copied. FC → PR builds a new graph without a populated reference, but remains experimental: review the report and check it in Premiere.',
+        'state_pending':'Pending','state_running':'Converting…','state_done':'Done','state_error':'Error','dash':'—',
         'count_zero':'0 projects','count_projects':'{n} projects','count_one':'{n} project','count_few':'{n} projects',
         'added':'Added to queue: {n}','queue_cleared':'Queue cleared','folder_error_title':'Folder unavailable',
         'processing':'Processing {done} of {total}','converting':'Converting: {name}','done':'Done: {name}',
@@ -91,12 +91,12 @@ TEXT = {
         'shortcut_summary_default':'Conversion complete. See the report for transferred shortcuts and warnings.',
         'dir_pr_fc':'PR → FC','dir_fc_pr':'FC → PR · experimental',
         'reverse_heading':'FC → PR SETTINGS · {name}',
-        'reverse_note':'Experimental writer: for the selected project, choose a populated Premiere reference with matching sequences, tracks and clips, plus an empty shell. Always verify the result in Premiere Pro.',
-        'reference_label':'Premiere reference','shell_label':'Empty Premiere shell',
-        'reference_placeholder':'Populated .prproj / XML project','shell_placeholder':'Empty .prproj from your Premiere version',
-        'choose_reference_project':'Choose a populated Premiere reference','choose_shell_project':'Choose an empty Premiere shell',
-        'no_reference':'Choose an existing Premiere reference for “{name}”.','no_shell':'Choose an existing empty Premiere shell for “{name}”.',
-        'templates_needed_title':'FC → PR projects need setup','templates_needed':'These projects were skipped:\n{details}\n\nSelect a row and provide its reference and shell. Other projects will continue.',
+        'reverse_note':'Direct FC → PR needs no populated Premiere project. An empty shell from your version is optional (only its build strings are used). Verify the result in Premiere Pro.',
+        'shell_label':'Empty shell (optional)',
+        'shell_placeholder':'Empty .prproj from your version, optional',
+        'choose_shell_project':'Choose an empty Premiere shell (optional)',
+        'no_shell':'The selected empty shell for “{name}” was not found.',
+        'templates_needed_title':'Premiere shell unavailable','templates_needed':'These projects were skipped:\n{details}\n\nClear the path or select an existing empty shell. Other projects will continue.',
         'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the separate shortcuts dialog','invalid_missing':'file not found','invalid_more':'…and {n} more',
         'report_write_failed':'Project created, but the report could not be saved: {error}',
     }
@@ -374,12 +374,8 @@ class MainWindow(QMainWindow):
         self.reverse_note.setWordWrap(True)
         reverse_layout.addWidget(self.reverse_heading)
         reverse_layout.addWidget(self.reverse_note)
-        self.reference_label, self.reference_edit, self.reference_btn = self.add_reverse_row(reverse_layout)
         self.shell_label, self.shell_edit, self.shell_btn = self.add_reverse_row(reverse_layout)
-        self.reference_btn.clicked.connect(self.choose_reference)
         self.shell_btn.clicked.connect(self.choose_shell)
-        self.reference_edit.textChanged.connect(
-            lambda value: self.reverse_field_changed('reference', value))
         self.shell_edit.textChanged.connect(
             lambda value: self.reverse_field_changed('shell', value))
         self.reverse_panel.hide()
@@ -461,11 +457,8 @@ class MainWindow(QMainWindow):
         self.queue_title.setText(self.t('queue'))
         self.table.setHorizontalHeaderLabels([
             self.t('project'), self.t('direction'), self.t('status'), self.t('result')])
-        self.reference_label.setText(self.t('reference_label'))
         self.shell_label.setText(self.t('shell_label'))
-        self.reference_edit.setPlaceholderText(self.t('reference_placeholder'))
         self.shell_edit.setPlaceholderText(self.t('shell_placeholder'))
-        self.reference_btn.setText(self.t('browse'))
         self.shell_btn.setText(self.t('browse'))
         self.reverse_note.setText(self.t('reverse_note'))
         self.open_btn.setText(self.t('open_folder'))
@@ -529,7 +522,7 @@ class MainWindow(QMainWindow):
                 continue
             self.files.append({
                 'path': str(path), 'direction': direction,
-                'reference': '', 'shell': '', 'state': 'pending',
+                'shell': '', 'state': 'pending',
                 'output': '', 'error': '',
             })
             added.append(len(self.files) - 1)
@@ -568,15 +561,6 @@ class MainWindow(QMainWindow):
             return self.files[row]
         return None
 
-    def choose_reference(self):
-        if self.selected_fc_record() is None:
-            return
-        path, _ = QFileDialog.getOpenFileName(
-            self, self.t('choose_reference_project'),
-            self.reference_edit.text().strip(), self.t('premiere_filter'))
-        if path:
-            self.reference_edit.setText(path)
-
     def choose_shell(self):
         if self.selected_fc_record() is None:
             return
@@ -594,15 +578,13 @@ class MainWindow(QMainWindow):
         self.reverse_heading.setText(self.t('reverse_heading', name=Path(record['path']).name))
         self._loading_reverse = True
         try:
-            for field, edit in (('reference', self.reference_edit),
-                                ('shell', self.shell_edit)):
+            for field, edit in (('shell', self.shell_edit),):
                 value = record.get(field, '')
                 if edit.text() != value:
                     edit.setText(value)
         finally:
             self._loading_reverse = False
-        for widget in (self.reference_edit, self.shell_edit,
-                       self.reference_btn, self.shell_btn):
+        for widget in (self.shell_edit, self.shell_btn):
             widget.setEnabled(not self.busy)
 
     def reverse_field_changed(self, field, value):
@@ -650,17 +632,12 @@ class MainWindow(QMainWindow):
                 state = record['state']
                 state_key = {'pending': 'state_pending', 'running': 'state_running',
                              'done': 'state_done', 'error': 'state_error'}[state]
-                if (record['direction'] == FC_TO_PR and state == 'pending'
-                        and (not record.get('reference') or not record.get('shell'))):
-                    state_key = 'state_setup'
                 status = QTableWidgetItem(self.t(state_key))
                 if state == 'done':
                     status.setForeground(Qt.green)
                 elif state == 'error':
                     status.setForeground(Qt.red)
                     status.setToolTip(record.get('error', ''))
-                elif state_key == 'state_setup':
-                    status.setToolTip(self.t('reverse_note'))
                 self.table.setItem(row, 2, status)
                 result = record.get('error', '') if state == 'error' else ''
                 result = result or (Path(record['output']).name if record.get('output') else self.t('dash'))
@@ -709,11 +686,9 @@ class MainWindow(QMainWindow):
             error = ''
             if record['direction'] == FC_TO_PR:
                 name = Path(record['path']).name
-                for field, error_key in (('reference', 'no_reference'), ('shell', 'no_shell')):
-                    value = record[field].strip()
-                    if not value or not Path(value).is_file():
-                        error = self.t(error_key, name=name)
-                        break
+                value = (record.get('shell') or '').strip()
+                if value and not Path(value).is_file():
+                    error = self.t('no_shell', name=name)
             if error:
                 self.files[index].update(state='error', error=error, output='')
                 missing.append((index, error))

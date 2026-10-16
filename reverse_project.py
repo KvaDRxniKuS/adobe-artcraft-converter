@@ -1,39 +1,42 @@
-"""UI-independent workflow for the experimental FilmCraft → Premiere writer."""
+"""UI-independent workflow for direct FilmCraft → Premiere project writing."""
 from __future__ import annotations
 
 import os
 import tempfile
 from pathlib import Path
 
-from fcproj_to_prproj import NativeWriter, same_file
+from direct_fc_to_prproj import DirectWriter
+from fcproj_to_prproj import same_file
 
 
 REPORT_TEXT = {
     'ru': {
         'title': 'Отчёт FilmCraft → Premiere',
-        'input': 'Вход', 'reference': 'Эталон', 'shell': 'Оболочка',
+        'input': 'Вход', 'shell': 'Пустая оболочка (необязательно)',
         'output': 'Выход', 'result': 'Результат',
         'empty': 'Предупреждений нет.',
-        'note': ('Экспериментальный writer не гарантирует, что Premiere Pro откроет '
-                 'результат. Новые последовательности, дорожки, медиа, эффекты и '
-                 'переходы не создаются.'),
+        'note': ('Экспериментальная прямая конвертация: медиа, дорожки и клипы '
+                 'создаются из FilmCraft без заполненного Premiere-эталона. '
+                 'Эффекты, переходы и особые параметры могут не переноситься. '
+                 'Открытие результата в Premiere Pro необходимо проверить.'),
         'media': 'Медиафайлы не копируются; при необходимости перепривяжите их в Premiere Pro.',
     },
     'en': {
         'title': 'FilmCraft → Premiere conversion report',
-        'input': 'Input', 'reference': 'Reference', 'shell': 'Shell',
+        'input': 'Input', 'shell': 'Empty shell (optional)',
         'output': 'Output', 'result': 'Result',
         'empty': 'No warnings.',
-        'note': ('This experimental writer cannot guarantee Premiere Pro will open the '
-                 'output. It does not create new sequences, tracks, media, effects, or '
-                 'transitions. Writer diagnostics below are currently in Russian.'),
+        'note': ('Experimental direct conversion: media, tracks and clips are built '
+                 'from FilmCraft without a populated Premiere reference. Effects, '
+                 'transitions and special properties may not transfer. Verify the '
+                 'result by opening it in Premiere Pro. Diagnostics below may be in Russian.'),
         'media': 'Media files are not copied; relink them in Premiere Pro if needed.',
     },
 }
 
 
 class ReportWriteError(OSError):
-    """The project was written, but its companion report could not be saved."""
+    """A project was written, but its companion report could not be saved."""
 
     def __init__(self, output: Path, error: Exception):
         self.output = output
@@ -44,34 +47,34 @@ def reverse_report_path(output: Path) -> Path:
     return output.with_name(output.stem + '_conversion_report.md')
 
 
-def reverse_report_text(source: Path, reference: Path, shell: Path, output: Path,
-                        warnings: list[str], language: str) -> str:
+def reverse_report_text(source: Path, output: Path, warnings: list[str],
+                        language: str, shell: Path | None = None) -> str:
     words = REPORT_TEXT['en' if language == 'en' else 'ru']
     lines = [
         f'# {words["title"]}', '',
         f'- {words["input"]}: `{source.name}`',
-        f'- {words["reference"]}: `{reference.name}`',
-        f'- {words["shell"]}: `{shell.name}`',
-        f'- {words["output"]}: `{output.name}`', '',
-        words['note'], '',
-        f'## {words["result"]}', '',
+        f'- {words["output"]}: `{output.name}`',
     ]
+    if shell is not None:
+        lines.append(f'- {words["shell"]}: `{shell.name}`')
+    lines += ['', words['note'], '', f'## {words["result"]}', '']
     lines += [f'- {message}' for message in warnings] if warnings else [words['empty']]
     lines += ['', words['media']]
     return '\n'.join(lines) + '\n'
 
 
-def convert_reverse_project(source: Path, reference: Path, shell: Path,
-                            output: Path, language: str = 'ru') -> tuple[Path, list[str]]:
-    """Write a project and its report; return report and writer diagnostics."""
+def convert_reverse_project(source: Path, output: Path, language: str = 'ru',
+                            shell: Path | None = None) -> tuple[Path, list[str]]:
+    """Write a new project and its report; no populated Premiere project needed."""
+    source, output = Path(source), Path(output)
+    shell = Path(shell) if shell else None
     report = reverse_report_path(output)
     if any(same_file(candidate, item)
            for candidate in (output, report)
-           for item in (source, reference, shell)):
-        raise ValueError('Результат или отчёт не может перезаписать входной проект или шаблон Premiere.')
+           for item in (source, shell) if item is not None):
+        raise ValueError('Результат или отчёт не может перезаписать входной проект или пустую оболочку.')
 
-    warnings = NativeWriter(source, reference, shell).write(output)
-    # The project has already been written; report errors must be distinguishable.
+    warnings = DirectWriter(source, shell).write(output)
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -79,8 +82,7 @@ def convert_reverse_project(source: Path, reference: Path, shell: Path,
             prefix=f'.{report.stem}.', suffix='.tmp', delete=False,
         ) as temp:
             temp_path = Path(temp.name)
-            temp.write(reverse_report_text(source, reference, shell, output,
-                                           warnings, language))
+            temp.write(reverse_report_text(source, output, warnings, language, shell))
         os.replace(temp_path, report)
     except Exception as exc:
         raise ReportWriteError(output, exc) from exc

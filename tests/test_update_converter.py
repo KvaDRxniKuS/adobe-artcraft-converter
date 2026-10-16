@@ -139,6 +139,21 @@ class UpdaterTests(unittest.TestCase):
                 get_latest=lambda: self.fail('Network requested')),
                 self.local)
 
+    def test_source_archive_includes_embedded_premiere_graph_module(self):
+        repository = Path(__file__).resolve().parents[1]
+        archive = self.base / 'current.zip'
+        with zipfile.ZipFile(archive, 'w') as package:
+            for path in repository.glob('*.py'):
+                package.write(path, f'root/{path.name}')
+            for name in REQUIRED_FILES:
+                if not name.endswith('.py'):
+                    package.write(repository / name, f'root/{name}')
+        output = self.base / 'installed'
+        unpack_source(archive, output)
+        self.assertEqual((output / 'premiere_seed.py').read_bytes(),
+                         (repository / 'premiere_seed.py').read_bytes())
+        self.assertTrue((output / 'direct_fc_to_prproj.py').is_file())
+
     def test_archive_rejects_duplicate_and_symlink_and_bad_python(self):
         archive = self.base / 'source.zip'
         make_archive(archive, files={'bad.py': 'def broken(\n'})

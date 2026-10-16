@@ -83,18 +83,25 @@ class ProjectImportTests(unittest.TestCase):
                          self.output_dir / 'sample_3.prproj')
 
     def test_reverse_job_in_the_shared_queue_creates_project_and_report(self):
-        record = {'path': str(self.filmcraft), 'direction': FC_TO_PR,
-                  'reference': str(self.premiere), 'shell': str(self.shell)}
+        record = {'path': str(self.filmcraft), 'direction': FC_TO_PR}
         output, messages = convert_queued_project(record, self.output_dir, 'en')
         self.assertEqual(output.suffix, '.prproj')
-        self.assertTrue(output.is_file())
+        self.assertTrue(output.read_bytes().startswith(b'\x1f\x8b'))
         self.assertGreater(messages, 0)
         report = output.with_name(output.stem + '_conversion_report.md')
         self.assertIn('FilmCraft → Premiere', report.read_text(encoding='utf-8'))
+        self.assertNotIn('Reference:', report.read_text(encoding='utf-8'))
         second_output, _ = convert_queued_project(record, self.output_dir, 'en')
         self.assertNotEqual(output, second_output)
         self.assertEqual(self.premiere.read_text(encoding='utf-8'), REFERENCE)
         self.assertEqual(self.shell.read_text(encoding='utf-8'), SHELL)
+
+    def test_optional_missing_shell_rejected_without_touching_fc(self):
+        with self.assertRaisesRegex(ValueError, 'оболочка'):
+            convert_queued_project({'path': str(self.filmcraft), 'direction': FC_TO_PR,
+                                    'shell': str(self.base / 'absent.prproj')},
+                                   self.output_dir)
+        self.assertEqual(detect_project_direction(self.filmcraft), FC_TO_PR)
 
     def test_forward_job_routes_to_existing_converter(self):
         def convert(path):
@@ -123,8 +130,7 @@ class ProjectImportTests(unittest.TestCase):
     def test_changed_type_after_import_is_not_converted_using_old_direction(self):
         self.filmcraft.write_text(REFERENCE, encoding='utf-8')
         with self.assertRaisesRegex(ValueError, 'Формат проекта изменился'):
-            convert_queued_project({'path': str(self.filmcraft), 'direction': FC_TO_PR,
-                                    'reference': str(self.premiere), 'shell': str(self.shell)},
+            convert_queued_project({'path': str(self.filmcraft), 'direction': FC_TO_PR},
                                    self.output_dir)
         self.assertFalse(self.output_dir.exists())
 

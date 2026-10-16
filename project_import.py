@@ -167,9 +167,10 @@ def convert_queued_project(record: dict, output_dir: Path,
         except Exception as exc:
             raise ReportWriteError(output, exc) from exc
         return output, len(converter.warnings)
-    reference, shell = Path(record.get('reference') or ''), Path(record.get('shell') or '')
-    if not reference.is_file() or not shell.is_file():
-        raise ValueError('Для FC → PR нужны существующие Premiere эталон и пустая оболочка.')
+    shell_value = (record.get('shell') or '').strip()
+    shell = Path(shell_value) if shell_value else None
+    if shell is not None and not shell.is_file():
+        raise ValueError('Указанная пустая оболочка Premiere не найдена.')
     output = next_output_path(output_dir, output_stem(source), '.prproj')
-    _, messages = convert_reverse_project(source, reference, shell, output, language)
+    _, messages = convert_reverse_project(source, output, language, shell=shell)
     return output, len(messages)

@@ -31,7 +31,7 @@ class MixedQueueUITests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         base = Path(self.directory.name)
         self.source = base / 'scene.fcproj'
-        self.reference = base / 'reference.prproj'
+        self.premiere = base / 'reference.prproj'
         self.shell = base / 'shell.prproj'
         self.output_dir = base / 'output'
         self.source.write_text(json.dumps({
@@ -41,7 +41,7 @@ class MixedQueueUITests(unittest.TestCase):
                 'kind': {'Sequence': {'video_tracks': [], 'audio_tracks': []}},
             }}},
         }), encoding='utf-8')
-        self.reference.write_text(REFERENCE, encoding='utf-8')
+        self.premiere.write_text(REFERENCE, encoding='utf-8')
         self.shell.write_text(SHELL, encoding='utf-8')
         self.window = desktop_app.MainWindow()
         self.addCleanup(self.window.close)
@@ -56,15 +56,15 @@ class MixedQueueUITests(unittest.TestCase):
         self.assertEqual(self.window.table.columnCount(), 4)
         self.assertFalse(hasattr(self.window, 'reverse_btn'))
         self.assertIn('.fcproj', self.window.drop.title_label.text())
-        self.window.add_paths([str(self.reference), str(self.source)])
+        self.window.add_paths([str(self.premiere), str(self.source)])
         self.assertEqual([r['direction'] for r in self.window.files], [PR_TO_FC, FC_TO_PR])
         self.assertFalse(self.window.reverse_panel.isHidden())
         self.assertEqual(self.window.table.currentRow(), 1)
         self.assertIn('FC → PR', self.window.table.item(1, 1).text())
-        if self.window.language == 'en':
-            self.assertIn('templates', self.window.table.item(1, 2).text().lower())
-        else:
-            self.assertIn('шаблоны', self.window.table.item(1, 2).text())
+        self.assertNotIn('reference', self.window.files[1])
+        self.assertFalse(hasattr(self.window, 'reference_edit'))
+        self.assertEqual(self.window.files[1]['state'], 'pending')
+        self.assertNotIn('template', self.window.table.item(1, 2).text().lower())
 
         shortcuts = self.source.with_name('shortcuts.json')
         shortcuts.write_text('{"format":"filmcraft-keyboard-shortcuts"}', encoding='utf-8')
@@ -73,32 +73,42 @@ class MixedQueueUITests(unittest.TestCase):
             self.assertIn(shortcuts.name, warning.call_args.args[2])
         self.assertEqual(len(self.window.files), 2)
 
-    def test_settings_belong_to_selected_fc_file_and_survive_language_change(self):
+    def test_optional_shell_belongs_to_selected_fc_item(self):
         second = self.source.with_name('another.fcproj')
         second.write_bytes(self.source.read_bytes())
         self.window.add_paths([str(self.source), str(second)])
         self.window.table.setCurrentCell(0, 0)
-        self.window.reference_edit.setText(str(self.reference))
         self.window.shell_edit.setText(str(self.shell))
         self.window.table.setCurrentCell(1, 0)
-        self.assertEqual(self.window.reference_edit.text(), '')
+        self.assertEqual(self.window.shell_edit.text(), '')
         self.window.language_combo.setCurrentIndex(1)
-        self.assertEqual(self.window.files[0]['reference'], str(self.reference))
+        self.assertEqual(self.window.files[0]['shell'], str(self.shell))
         self.window.table.setCurrentCell(0, 0)
         self.assertEqual(self.window.shell_edit.text(), str(self.shell))
 
-    def test_missing_reference_is_explained_without_starting_fc(self):
-        self.window.add_paths([str(self.source)])
-        with patch.object(QMessageBox, 'warning') as warning:
-            self.window.start_queue()
-            warning.assert_called_once()
-        self.assertIsNone(self.window.worker)
-        self.assertFalse(self.window.busy)
-        self.assertEqual(self.window.files[0]['state'], 'error')
-        self.assertEqual(self.window.table.currentRow(), 0)
+    def test_no_shell_required_and_no_extra_window(self):
+        self.window.add_paths([str(self.premiere), str(self.source)])
+        calls = []
 
-    def test_incomplete_fc_does_not_block_pr_job(self):
-        self.window.add_paths([str(self.reference), str(self.source)])
+        def convert(record, output_dir, language):
+            calls.append(record['direction'])
+            output_dir.mkdir(exist_ok=True)
+            output = output_dir / (str(len(calls)) + '.prproj')
+            output.write_text('<PremiereData/>', encoding='utf-8')
+            return output, 0
+
+        with patch('desktop_app.convert_queued_project', side_effect=convert), \
+             patch.object(QMessageBox, 'warning') as warning:
+            self.window.start_queue()
+            self.assertTrue(self.window.worker.wait(5000))
+            self.app.processEvents()
+            warning.assert_not_called()
+        self.assertEqual(calls, [PR_TO_FC, FC_TO_PR])
+        self.assertEqual([r['state'] for r in self.window.files], ['done', 'done'])
+
+    def test_invalid_optional_shell_does_not_block_pr_job(self):
+        self.window.add_paths([str(self.premiere), str(self.source)])
+        self.window.shell_edit.setText(str(self.shell.with_name('missing.prproj')))
 
         def convert(record, output_dir, language):
             self.assertEqual(record['direction'], PR_TO_FC)
@@ -113,20 +123,19 @@ class MixedQueueUITests(unittest.TestCase):
             warning.assert_called_once()
             self.assertTrue(self.window.worker.wait(5000))
             self.app.processEvents()
-        self.assertFalse(self.window.busy)
         self.assertEqual([r['state'] for r in self.window.files], ['done', 'error'])
         self.assertTrue(Path(self.window.files[0]['output']).is_file())
 
-    def test_fc_project_converts_from_same_queue_with_report(self):
+    def test_fc_project_converts_without_any_premiere_input(self):
         self.window.add_paths([str(self.source)])
-        self.window.reference_edit.setText(str(self.reference))
-        self.window.shell_edit.setText(str(self.shell))
-        with patch.object(QMessageBox, 'critical') as critical:
+        with patch.object(QMessageBox, 'critical') as critical, \
+             patch.object(QMessageBox, 'warning') as warning:
             self.window.start_queue()
             self.assertTrue(self.window.busy)
             self.assertTrue(self.window.worker.wait(5000))
             self.app.processEvents()
             critical.assert_not_called()
+            warning.assert_not_called()
         self.assertFalse(self.window.busy)
         self.assertEqual(self.window.files[0]['state'], 'done')
         output = Path(self.window.files[0]['output'])
