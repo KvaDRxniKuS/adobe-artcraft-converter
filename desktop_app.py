@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Native desktop GUI for direct Premiere Pro .prproj -> FilmCraft .fcproj conversion.
+"""Native desktop UI for Premiere → FilmCraft and experimental FilmCraft → Premiere.
 Built with PySide6. No browser/server is used.
 """
 from __future__ import annotations
-import json, os, re, sys
+import json, os, sys
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -11,30 +11,32 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QLineEdit,
     QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView, QVBoxLayout,
     QHBoxLayout, QProgressBar, QMessageBox, QAbstractItemView, QSizePolicy, QDialog, QComboBox,
+    QScrollArea,
 )
-from prproj_to_fcproj import Converter
+from project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
+from reverse_project import ReportWriteError
 from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
 
 APP_NAME='FilmCraft PRPROJ Converter'
 
 TEXT = {
     'ru': {
-        'window_title':'Конвертер Premiere ↔ FilmCraft','header_title':'PRPROJ  →  FilmCraft',
+        'window_title':'Конвертер Premiere ↔ FilmCraft','header_title':'Premiere  ↔  FilmCraft',
         'subtitle':'Нативный импорт проектных данных · очередь конвертации','shortcuts':'Горячие клавиши',
-        'language':'Язык / Language','local_app':'ЛОКАЛЬНОЕ ПРИЛОЖЕНИЕ','drop_title':'Перетащите .prproj сюда',
-        'drop_note':'Можно добавить несколько проектов — они попадут в очередь','add':'＋  Добавить проекты',
+        'language':'Язык / Language','local_app':'ЛОКАЛЬНОЕ ПРИЛОЖЕНИЕ','drop_title':'Перетащите .prproj или .fcproj сюда',
+        'drop_note':'Направление определяется по содержимому файла · можно добавить несколько проектов','add':'＋  Добавить проекты',
         'remove':'Удалить выбранные','clear':'Очистить очередь','output_folder':'ПАПКА ВЫВОДА','configurable':'настраивается',
-        'output_placeholder':'Папка для FilmCraft проектов','browse':'Обзор…','queue':'ОЧЕРЕДЬ','project':'Проект Premiere',
+        'output_placeholder':'Папка для результатов .fcproj и .prproj','browse':'Обзор…','queue':'ОЧЕРЕДЬ','project':'Проект','direction':'Направление',
         'status':'Статус','result':'Результат','ready':'Готов к работе','open_folder':'Открыть папку',
-        'convert_queue':'Конвертировать очередь','footnote':'Поддерживаемые эффекты переносятся редактируемыми, если есть аналог. Неизвестные настройки и эффекты попадут в отчёт. Исходные медиа не копируются.',
-        'state_pending':'Ожидает','state_running':'Конвертация…','state_done':'Готово','state_error':'Ошибка','dash':'—',
+        'convert_queue':'Конвертировать очередь','footnote':'Медиа не копируются. PR → FC переносит только поддерживаемые эффекты; FC → PR — экспериментальный writer по графу-эталону. Проверяйте результат и отчёт в целевом приложении.',
+        'state_pending':'Ожидает','state_setup':'Нужны шаблоны','state_running':'Конвертация…','state_done':'Готово','state_error':'Ошибка','dash':'—',
         'count_zero':'0 проектов','count_projects':'{n} проектов','count_one':'{n} проект','count_few':'{n} проекта',
         'added':'Добавлено в очередь: {n}','queue_cleared':'Очередь очищена','folder_error_title':'Папка недоступна',
         'processing':'Обработка {done} из {total}','converting':'Конвертация: {name}','done':'Готово: {name}',
-        'warnings_suffix':' · предупреждений: {n}','done_warnings':'Готово: {name} · предупреждений: {n}','failed':'Ошибка: {name}','queue_finished':'Очередь завершена',
-        'close_running_title':'Конвертация выполняется','close_running_text':'Закрыть приложение? Текущая очередь будет прервана.',
-        'add_dialog':'Выберите проекты Premiere','premiere_filter':'Проекты Premiere/XML (*.prproj *.xml *.txt);;Все файлы (*)',
-        'output_dialog':'Папка для FilmCraft проектов','shortcut_title':'Конвертер горячих клавиш',
+'done_warnings':'Готово: {name} · сообщений в отчёте: {n}','failed':'Ошибка: {name}','queue_finished':'Очередь завершена',
+        'close_running_title':'Конвертация выполняется','close_running_text':'Дождитесь завершения очереди, чтобы не прерывать запись проекта.',
+        'add_dialog':'Выберите проекты Premiere или FilmCraft','project_filter':'Проекты (*.prproj *.fcproj *.json *.xml *.txt);;Все файлы (*)','premiere_filter':'Проекты Premiere/XML (*.prproj *.xml *.txt);;Все файлы (*)',
+        'output_dialog':'Папка для конвертированных проектов','shortcut_title':'Конвертер горячих клавиш',
         'shortcut_heading':'Premiere KYS ↔ FilmCraft JSON',
         'shortcut_note':'Выберите .kys (XML) или JSON FilmCraft. Направление определяется автоматически; команды без соответствия будут указаны в отчёте.',
         'shortcut_input_placeholder':'Исходный файл .kys или FilmCraft shortcuts .json','shortcut_file':'Файл…',
@@ -46,30 +48,35 @@ TEXT = {
         'file_created':'Файл создан:\n{path}\n\n{summary}\nПодробности: {report}',
         'conversion_error':'Ошибка конвертации','report_title':'Отчёт конвертации горячих клавиш',
         'report_input':'Вход','report_output':'Выход','report_result':'Результат',
-        'conversion_report_title':'Отчёт конвертации Premiere Pro → FilmCraft','input':'Вход','output':'Выход',
-        'sequences':'Последовательностей','timeline_clips':'Клипов на таймлайнах','transitions':'Переходов',
-        'warning_count':'Предупреждений','warnings':'Предупреждения','no_warnings':'Предупреждений нет.',
-        'media_note':'Медиафайлы не копируются. Если они перемещены, перепривяжите их в FilmCraft.',
-        'status_error':'Ошибка','shortcut_summary_default':'Конвертация выполнена. См. отчёт для списка назначений и предупреждений.',
-        'project_count_word':'проект',
+        'shortcut_summary_default':'Конвертация выполнена. См. отчёт для списка назначений и предупреждений.',
+        'dir_pr_fc':'PR → FC','dir_fc_pr':'FC → PR · эксперим.',
+        'reverse_heading':'ПАРАМЕТРЫ FC → PR · {name}',
+        'reverse_note':'Экспериментальный writer: для выбранного проекта укажите заполненный эталон Premiere с совпадающими последовательностями, дорожками и клипами, а также пустую оболочку. Результат обязательно проверяйте в Premiere Pro.',
+        'reference_label':'Эталон Premiere','shell_label':'Пустая оболочка Premiere',
+        'reference_placeholder':'Заполненный проект .prproj / XML','shell_placeholder':'Пустой проект .prproj вашей версии',
+        'choose_reference_project':'Выберите заполненный эталон Premiere','choose_shell_project':'Выберите пустую оболочку Premiere',
+        'no_reference':'Для «{name}» выберите существующий эталон Premiere.','no_shell':'Для «{name}» выберите существующую пустую оболочку Premiere.',
+        'templates_needed_title':'Не настроены проекты FC → PR','templates_needed':'Эти проекты пропущены:\n{details}\n\nВыберите строку и укажите эталон и оболочку. Остальные проекты будут обработаны.',
+        'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — используйте отдельное окно','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
+        'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
     },
     'en': {
-        'window_title':'Premiere ↔ FilmCraft Converter','header_title':'PRPROJ  →  FilmCraft',
+        'window_title':'Premiere ↔ FilmCraft Converter','header_title':'Premiere  ↔  FilmCraft',
         'subtitle':'Native project import · conversion queue','shortcuts':'Keyboard shortcuts',
-        'language':'Language / Язык','local_app':'LOCAL DESKTOP APP','drop_title':'Drop .prproj files here',
-        'drop_note':'Add multiple projects to build a conversion queue','add':'＋  Add projects',
+        'language':'Language / Язык','local_app':'LOCAL DESKTOP APP','drop_title':'Drop .prproj or .fcproj files here',
+        'drop_note':'Direction is detected from file content · add multiple projects','add':'＋  Add projects',
         'remove':'Remove selected','clear':'Clear queue','output_folder':'OUTPUT FOLDER','configurable':'configurable',
-        'output_placeholder':'FilmCraft output folder','browse':'Browse…','queue':'QUEUE','project':'Premiere project',
+        'output_placeholder':'Output folder for .fcproj and .prproj','browse':'Browse…','queue':'QUEUE','project':'Project','direction':'Direction',
         'status':'Status','result':'Result','ready':'Ready','open_folder':'Open folder',
-        'convert_queue':'Convert queue','footnote':'Supported effects remain editable when an equivalent exists. Unknown settings and effects are listed in the report. Source media is not copied.',
-        'state_pending':'Pending','state_running':'Converting…','state_done':'Done','state_error':'Error','dash':'—',
+        'convert_queue':'Convert queue','footnote':'Media is not copied. PR → FC transfers supported effects; FC → PR is an experimental reference-based writer. Review the report and verify the result in the destination app.',
+        'state_pending':'Pending','state_setup':'Set templates','state_running':'Converting…','state_done':'Done','state_error':'Error','dash':'—',
         'count_zero':'0 projects','count_projects':'{n} projects','count_one':'{n} project','count_few':'{n} projects',
         'added':'Added to queue: {n}','queue_cleared':'Queue cleared','folder_error_title':'Folder unavailable',
         'processing':'Processing {done} of {total}','converting':'Converting: {name}','done':'Done: {name}',
-        'warnings_suffix':' · warnings: {n}','done_warnings':'Done: {name} · warnings: {n}','failed':'Error: {name}','queue_finished':'Queue finished',
-        'close_running_title':'Conversion in progress','close_running_text':'Close the application? The current queue will be interrupted.',
-        'add_dialog':'Select Premiere projects','premiere_filter':'Premiere/XML projects (*.prproj *.xml *.txt);;All files (*)',
-        'output_dialog':'FilmCraft output folder','shortcut_title':'Keyboard Shortcut Converter',
+'done_warnings':'Done: {name} · report messages: {n}','failed':'Error: {name}','queue_finished':'Queue finished',
+        'close_running_title':'Conversion in progress','close_running_text':'Wait for the queue to finish so project files are not interrupted during writing.',
+        'add_dialog':'Select Premiere or FilmCraft projects','project_filter':'Projects (*.prproj *.fcproj *.json *.xml *.txt);;All files (*)','premiere_filter':'Premiere/XML projects (*.prproj *.xml *.txt);;All files (*)',
+        'output_dialog':'Converted projects folder','shortcut_title':'Keyboard Shortcut Converter',
         'shortcut_heading':'Premiere KYS ↔ FilmCraft JSON',
         'shortcut_note':'Choose a Premiere .kys (XML) or FilmCraft JSON file. Direction is detected automatically; unmapped commands are listed in the report.',
         'shortcut_input_placeholder':'Input .kys or FilmCraft shortcuts .json file','shortcut_file':'Browse…',
@@ -81,12 +88,17 @@ TEXT = {
         'file_created':'Created file:\n{path}\n\n{summary}\nDetails: {report}',
         'conversion_error':'Conversion error','report_title':'Keyboard shortcut conversion report',
         'report_input':'Input','report_output':'Output','report_result':'Result',
-        'conversion_report_title':'Premiere Pro → FilmCraft conversion report','input':'Input','output':'Output',
-        'sequences':'Sequences','timeline_clips':'Timeline clips','transitions':'Transitions',
-        'warning_count':'Warnings','warnings':'Warnings','no_warnings':'No warnings.',
-        'media_note':'Media files are not copied. If they have moved, relink them in FilmCraft.',
-        'status_error':'Error','shortcut_summary_default':'Conversion complete. See the report for transferred shortcuts and warnings.',
-        'project_count_word':'project',
+        'shortcut_summary_default':'Conversion complete. See the report for transferred shortcuts and warnings.',
+        'dir_pr_fc':'PR → FC','dir_fc_pr':'FC → PR · experimental',
+        'reverse_heading':'FC → PR SETTINGS · {name}',
+        'reverse_note':'Experimental writer: for the selected project, choose a populated Premiere reference with matching sequences, tracks and clips, plus an empty shell. Always verify the result in Premiere Pro.',
+        'reference_label':'Premiere reference','shell_label':'Empty Premiere shell',
+        'reference_placeholder':'Populated .prproj / XML project','shell_placeholder':'Empty .prproj from your Premiere version',
+        'choose_reference_project':'Choose a populated Premiere reference','choose_shell_project':'Choose an empty Premiere shell',
+        'no_reference':'Choose an existing Premiere reference for “{name}”.','no_shell':'Choose an existing empty Premiere shell for “{name}”.',
+        'templates_needed_title':'FC → PR projects need setup','templates_needed':'These projects were skipped:\n{details}\n\nSelect a row and provide its reference and shell. Other projects will continue.',
+        'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the separate shortcuts dialog','invalid_missing':'file not found','invalid_more':'…and {n} more',
+        'report_write_failed':'Project created, but the report could not be saved: {error}',
     }
 }
 
@@ -94,16 +106,6 @@ def tr(language: str, key: str, **values) -> str:
     language = 'en' if language == 'en' else 'ru'
     text = TEXT[language].get(key, TEXT['ru'].get(key, key))
     return text.format(**values) if values else text
-
-
-def output_stem(path: Path) -> str:
-    name=path.name
-    if name.lower().endswith('.prproj.txt'):
-        name=name[:-len('.prproj.txt')]
-    elif path.suffix:
-        name=path.stem
-    name=re.sub(r'[^\w.() -]+','_',name,flags=re.UNICODE).strip(' .')
-    return name or 'Premiere_Project'
 
 
 def unique_path(directory: Path, stem: str, suffix: str) -> Path:
@@ -219,109 +221,265 @@ class DropArea(QFrame):
 
 
 class ConversionWorker(QThread):
-    fileStarted=Signal(int)
-    fileSucceeded=Signal(int,str,int)
-    fileFailed=Signal(int,str)
-    queueFinished=Signal()
-    def __init__(self, records:list[dict], output_dir:Path, language='ru'):
-        super().__init__();self.records=records;self.output_dir=output_dir;self.language=language
+    fileStarted = Signal(int)
+    fileSucceeded = Signal(int, str, int)
+    fileFailed = Signal(int, str, str)
+    queueFinished = Signal()
+
+    def __init__(self, records: list[tuple[int, dict]], output_dir: Path, language='ru'):
+        super().__init__()
+        self.records = records
+        self.output_dir = output_dir
+        self.language = language
+
     def run(self):
-        for index,record in self.records:
+        for index, record in self.records:
+            if self.isInterruptionRequested():
+                break
             self.fileStarted.emit(index)
             try:
-                source=Path(record['path'])
-                stem=output_stem(source)
-                destination=unique_path(self.output_dir,stem,'.fcproj')
-                converter=Converter(source,language=self.language)
-                doc=converter.convert(destination)
-                report=destination.with_name(destination.stem+'_conversion_report.md')
-                seqs=sum(1 for x in doc['project']['items'].values() if 'Sequence' in x.get('kind',{}))
-                clips=transitions=0
-                for item in doc['project']['items'].values():
-                    seq=item.get('kind',{}).get('Sequence')
-                    if not seq:continue
-                    for track in seq.get('video_tracks',[])+seq.get('audio_tracks',[]):
-                        clips+=len(track.get('items',[]));transitions+=len(track.get('transitions',[]))
-                lines=[f'# {tr(self.language,"conversion_report_title")}','',f'- {tr(self.language,"input")}: `{source.name}`',f'- {tr(self.language,"output")}: `{destination.name}`',f'- {tr(self.language,"sequences")}: {seqs}',f'- {tr(self.language,"timeline_clips")}: {clips}',f'- {tr(self.language,"transitions")}: {transitions}',f'- {tr(self.language,"warning_count")}: {len(converter.warnings)}','',f'## {tr(self.language,"warnings")}','']
-                lines += [f'- {w}' for w in converter.warnings] if converter.warnings else [tr(self.language,'no_warnings')]
-                lines += ['', tr(self.language,'media_note')]
-                report.write_text('\n'.join(lines)+'\n',encoding='utf-8')
-                self.fileSucceeded.emit(index,str(destination),len(converter.warnings))
+                destination, messages = convert_queued_project(record, self.output_dir, self.language)
+                self.fileSucceeded.emit(index, str(destination), messages)
+            except ReportWriteError as exc:
+                # The Premiere file exists even though its report could not be saved.
+                # ReportWriteError carries the output path to avoid guessing a
+                # destination after the converter has already created a file.
+                self.fileFailed.emit(index, str(exc), str(exc.output))
             except Exception as exc:
-                self.fileFailed.emit(index,str(exc))
+                self.fileFailed.emit(index, str(exc) or type(exc).__name__, '')
         self.queueFinished.emit()
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.settings=QSettings('FilmCraftTools','PRPROJConverter')
-        self.language=self.settings.value('language','ru',type=str)
-        if self.language not in ('ru','en'): self.language='ru'
-        self.resize(1000,760);self.setMinimumSize(780,620)
-        self.files:list[dict]=[];self.worker=None;self.busy=False;self.last_status=('ready',{})
-        central=QWidget();self.setCentralWidget(central);root=QVBoxLayout(central);root.setContentsMargins(30,24,30,24);root.setSpacing(16)
-        # Header
-        header=QHBoxLayout();brand=QVBoxLayout()
-        self.header_title=QLabel();self.header_title.setObjectName('title');self.header_title.setTextFormat(Qt.RichText)
-        self.subtitle_label=QLabel();self.subtitle_label.setObjectName('muted')
-        brand.addWidget(self.header_title);brand.addWidget(self.subtitle_label);header.addLayout(brand);header.addStretch()
-        self.shortcuts_btn=QPushButton();self.shortcuts_btn.clicked.connect(self.open_shortcut_converter);header.addWidget(self.shortcuts_btn,0,Qt.AlignTop)
-        self.language_combo=QComboBox();self.language_combo.addItem('Русский','ru');self.language_combo.addItem('English','en')
-        self.language_combo.setCurrentIndex(0 if self.language=='ru' else 1);self.language_combo.currentIndexChanged.connect(self.language_changed)
-        header.addWidget(self.language_combo,0,Qt.AlignTop)
-        self.local_tag=QLabel();self.local_tag.setObjectName('tag');header.addWidget(self.local_tag,0,Qt.AlignTop);root.addLayout(header)
-        # Drop panel
-        self.drop=DropArea(self.language);self.drop.filesDropped.connect(self.add_paths);root.addWidget(self.drop)
-        actions=QHBoxLayout();self.add_btn=QPushButton();self.add_btn.clicked.connect(self.choose_files)
-        self.remove_btn=QPushButton();self.remove_btn.clicked.connect(self.remove_selected)
-        self.clear_btn=QPushButton();self.clear_btn.clicked.connect(self.clear_queue)
-        actions.addWidget(self.add_btn);actions.addWidget(self.remove_btn);actions.addStretch();actions.addWidget(self.clear_btn);root.addLayout(actions)
-        # Output directory
-        outbox=QFrame();outbox.setObjectName('panel');ol=QVBoxLayout(outbox);ol.setContentsMargins(16,13,16,13);ol.setSpacing(8)
-        outhead=QHBoxLayout();self.output_title=QLabel();self.output_title.setObjectName('section');outhead.addWidget(self.output_title);outhead.addStretch();self.output_note=QLabel();self.output_note.setObjectName('muted');outhead.addWidget(self.output_note);ol.addLayout(outhead)
-        row=QHBoxLayout();self.output_edit=QLineEdit();self.output_edit.setText(self.settings.value('output_dir','',type=str))
-        self.browse_btn=QPushButton();self.browse_btn.clicked.connect(self.choose_output_dir);row.addWidget(self.output_edit,1);row.addWidget(self.browse_btn);ol.addLayout(row);root.addWidget(outbox)
-        # Queue
-        qhead=QHBoxLayout();self.queue_title=QLabel();self.queue_title.setObjectName('section');qhead.addWidget(self.queue_title);qhead.addStretch();self.count_label=QLabel();self.count_label.setObjectName('muted');qhead.addWidget(self.count_label);root.addLayout(qhead)
-        self.table=QTableWidget(0,3);self.table.horizontalHeader().setSectionResizeMode(0,QHeaderView.Stretch);self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeToContents);self.table.horizontalHeader().setSectionResizeMode(2,QHeaderView.Stretch);self.table.verticalHeader().setVisible(False);self.table.setSelectionBehavior(QAbstractItemView.SelectRows);self.table.setEditTriggers(QAbstractItemView.NoEditTriggers);self.table.setAlternatingRowColors(True);self.table.setMinimumHeight(190);root.addWidget(self.table,1)
-        # Footer
-        footer=QHBoxLayout();info=QVBoxLayout();self.status_label=QLabel();self.status_label.setObjectName('status');self.progress=QProgressBar();self.progress.setTextVisible(False);self.progress.setFixedHeight(7);self.progress.setRange(0,100);self.progress.setValue(0);info.addWidget(self.status_label);info.addWidget(self.progress);footer.addLayout(info,1)
-        self.open_btn=QPushButton();self.open_btn.clicked.connect(self.open_selected_folder);self.open_btn.setEnabled(False);footer.addWidget(self.open_btn)
-        self.run_btn=QPushButton();self.run_btn.setObjectName('primary');self.run_btn.clicked.connect(self.start_queue);footer.addWidget(self.run_btn);root.addLayout(footer)
-        self.footnote_label=QLabel();self.footnote_label.setObjectName('footnote');self.footnote_label.setWordWrap(True);root.addWidget(self.footnote_label)
-        self.apply_theme();self.retranslate();self.refresh()
+        self.settings = QSettings('FilmCraftTools', 'PRPROJConverter')
+        self.language = self.settings.value('language', 'ru', type=str)
+        if self.language not in ('ru', 'en'):
+            self.language = 'ru'
+        self.resize(1050, 870)
+        self.setMinimumSize(790, 630)
+        self.files: list[dict] = []
+        self.worker = None
+        self.busy = False
+        self._loading_reverse = False
+        self.last_status = ('ready', {})
 
-    def t(self,key,**values):
-        return tr(self.language,key,**values)
+        # Keep controls accessible on smaller laptop screens when FC settings appear.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        self.setCentralWidget(scroll)
+        central = QWidget()
+        root = QVBoxLayout(central)
+        root.setContentsMargins(26, 20, 26, 20)
+        root.setSpacing(12)
 
-    def language_changed(self,index):
-        lang=self.language_combo.itemData(index)
-        if lang not in ('ru','en') or lang==self.language:return
-        self.language=lang;self.settings.setValue('language',lang);self.retranslate();self.refresh()
+        header = QHBoxLayout()
+        brand = QVBoxLayout()
+        self.header_title = QLabel()
+        self.header_title.setObjectName('title')
+        self.header_title.setTextFormat(Qt.RichText)
+        self.subtitle_label = QLabel()
+        self.subtitle_label.setObjectName('muted')
+        brand.addWidget(self.header_title)
+        brand.addWidget(self.subtitle_label)
+        header.addLayout(brand)
+        header.addStretch()
+        self.shortcuts_btn = QPushButton()
+        self.shortcuts_btn.clicked.connect(self.open_shortcut_converter)
+        header.addWidget(self.shortcuts_btn, 0, Qt.AlignTop)
+        self.language_combo = QComboBox()
+        self.language_combo.addItem('Русский', 'ru')
+        self.language_combo.addItem('English', 'en')
+        self.language_combo.setCurrentIndex(0 if self.language == 'ru' else 1)
+        self.language_combo.currentIndexChanged.connect(self.language_changed)
+        header.addWidget(self.language_combo, 0, Qt.AlignTop)
+        self.local_tag = QLabel()
+        self.local_tag.setObjectName('tag')
+        header.addWidget(self.local_tag, 0, Qt.AlignTop)
+        root.addLayout(header)
+
+        self.drop = DropArea(self.language)
+        self.drop.filesDropped.connect(self.add_paths)
+        root.addWidget(self.drop)
+        actions = QHBoxLayout()
+        self.add_btn = QPushButton()
+        self.add_btn.clicked.connect(self.choose_files)
+        self.remove_btn = QPushButton()
+        self.remove_btn.clicked.connect(self.remove_selected)
+        self.clear_btn = QPushButton()
+        self.clear_btn.clicked.connect(self.clear_queue)
+        actions.addWidget(self.add_btn)
+        actions.addWidget(self.remove_btn)
+        actions.addStretch()
+        actions.addWidget(self.clear_btn)
+        root.addLayout(actions)
+
+        outbox = QFrame()
+        outbox.setObjectName('panel')
+        out_layout = QVBoxLayout(outbox)
+        out_layout.setContentsMargins(16, 11, 16, 11)
+        out_layout.setSpacing(6)
+        out_head = QHBoxLayout()
+        self.output_title = QLabel()
+        self.output_title.setObjectName('section')
+        self.output_note = QLabel()
+        self.output_note.setObjectName('muted')
+        out_head.addWidget(self.output_title)
+        out_head.addStretch()
+        out_head.addWidget(self.output_note)
+        out_layout.addLayout(out_head)
+        row = QHBoxLayout()
+        self.output_edit = QLineEdit()
+        self.output_edit.setText(self.settings.value('output_dir', '', type=str))
+        self.browse_btn = QPushButton()
+        self.browse_btn.clicked.connect(self.choose_output_dir)
+        row.addWidget(self.output_edit, 1)
+        row.addWidget(self.browse_btn)
+        out_layout.addLayout(row)
+        root.addWidget(outbox)
+
+        qhead = QHBoxLayout()
+        self.queue_title = QLabel()
+        self.queue_title.setObjectName('section')
+        self.count_label = QLabel()
+        self.count_label.setObjectName('muted')
+        qhead.addWidget(self.queue_title)
+        qhead.addStretch()
+        qhead.addWidget(self.count_label)
+        root.addLayout(qhead)
+        self.table = QTableWidget(0, 4)
+        for index, mode in enumerate((QHeaderView.Stretch, QHeaderView.ResizeToContents,
+                                      QHeaderView.ResizeToContents, QHeaderView.Stretch)):
+            self.table.horizontalHeader().setSectionResizeMode(index, mode)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setMinimumHeight(155)
+        self.table.currentCellChanged.connect(self.update_reverse_panel)
+        root.addWidget(self.table, 1)
+
+        # These controls belong to the selected FC entry, not to the whole queue.
+        self.reverse_panel = QFrame()
+        self.reverse_panel.setObjectName('panel')
+        reverse_layout = QVBoxLayout(self.reverse_panel)
+        reverse_layout.setContentsMargins(16, 10, 16, 10)
+        reverse_layout.setSpacing(6)
+        self.reverse_heading = QLabel()
+        self.reverse_heading.setObjectName('section')
+        self.reverse_note = QLabel()
+        self.reverse_note.setObjectName('muted')
+        self.reverse_note.setWordWrap(True)
+        reverse_layout.addWidget(self.reverse_heading)
+        reverse_layout.addWidget(self.reverse_note)
+        self.reference_label, self.reference_edit, self.reference_btn = self.add_reverse_row(reverse_layout)
+        self.shell_label, self.shell_edit, self.shell_btn = self.add_reverse_row(reverse_layout)
+        self.reference_btn.clicked.connect(self.choose_reference)
+        self.shell_btn.clicked.connect(self.choose_shell)
+        self.reference_edit.textChanged.connect(
+            lambda value: self.reverse_field_changed('reference', value))
+        self.shell_edit.textChanged.connect(
+            lambda value: self.reverse_field_changed('shell', value))
+        self.reverse_panel.hide()
+        root.addWidget(self.reverse_panel)
+
+        footer = QHBoxLayout()
+        info = QVBoxLayout()
+        self.status_label = QLabel()
+        self.status_label.setObjectName('status')
+        self.progress = QProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(7)
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        info.addWidget(self.status_label)
+        info.addWidget(self.progress)
+        footer.addLayout(info, 1)
+        self.open_btn = QPushButton()
+        self.open_btn.clicked.connect(self.open_selected_folder)
+        self.open_btn.setEnabled(False)
+        footer.addWidget(self.open_btn)
+        self.run_btn = QPushButton()
+        self.run_btn.setObjectName('primary')
+        self.run_btn.clicked.connect(self.start_queue)
+        footer.addWidget(self.run_btn)
+        root.addLayout(footer)
+        self.footnote_label = QLabel()
+        self.footnote_label.setObjectName('footnote')
+        self.footnote_label.setWordWrap(True)
+        root.addWidget(self.footnote_label)
+        scroll.setWidget(central)
+
+        self.apply_theme()
+        self.retranslate()
+        self.refresh()
+
+    @staticmethod
+    def add_reverse_row(layout):
+        row = QHBoxLayout()
+        label = QLabel()
+        label.setMinimumWidth(160)
+        edit = QLineEdit()
+        button = QPushButton()
+        row.addWidget(label)
+        row.addWidget(edit, 1)
+        row.addWidget(button)
+        layout.addLayout(row)
+        return label, edit, button
+
+    def t(self, key, **values):
+        return tr(self.language, key, **values)
+
+    def language_changed(self, index):
+        lang = self.language_combo.itemData(index)
+        if lang not in ('ru', 'en') or lang == self.language:
+            return
+        self.language = lang
+        self.settings.setValue('language', lang)
+        self.retranslate()
 
     def retranslate(self):
         self.setWindowTitle(self.t('window_title'))
-        self.language_combo.setItemText(0,'Русский' if self.language=='ru' else 'Russian')
-        self.language_combo.setItemText(1,'Английский' if self.language=='ru' else 'English')
-        self.header_title.setText(self.t('header_title').replace('→','<span style="color:#647184">→</span>'))
-        self.subtitle_label.setText(self.t('subtitle'));self.shortcuts_btn.setText(self.t('shortcuts'))
-        self.local_tag.setText(self.t('local_app'));self.drop.language=self.language;self.drop.retranslate()
-        self.add_btn.setText(self.t('add'));self.remove_btn.setText(self.t('remove'));self.clear_btn.setText(self.t('clear'))
-        self.output_title.setText(self.t('output_folder'));self.output_note.setText(self.t('configurable'))
-        self.output_edit.setPlaceholderText(self.t('output_placeholder'));self.browse_btn.setText(self.t('browse'))
-        self.queue_title.setText(self.t('queue'));self.table.setHorizontalHeaderLabels([self.t('project'),self.t('status'),self.t('result')])
-        self.open_btn.setText(self.t('open_folder'));self.run_btn.setText(self.t('convert_queue'))
+        self.language_combo.setItemText(0, 'Русский' if self.language == 'ru' else 'Russian')
+        self.language_combo.setItemText(1, 'Английский' if self.language == 'ru' else 'English')
+        self.header_title.setText(self.t('header_title').replace(
+            '↔', '<span style="color:#647184">↔</span>'))
+        self.subtitle_label.setText(self.t('subtitle'))
+        self.shortcuts_btn.setText(self.t('shortcuts'))
+        self.local_tag.setText(self.t('local_app'))
+        self.drop.language = self.language
+        self.drop.retranslate()
+        self.add_btn.setText(self.t('add'))
+        self.remove_btn.setText(self.t('remove'))
+        self.clear_btn.setText(self.t('clear'))
+        self.output_title.setText(self.t('output_folder'))
+        self.output_note.setText(self.t('configurable'))
+        self.output_edit.setPlaceholderText(self.t('output_placeholder'))
+        self.browse_btn.setText(self.t('browse'))
+        self.queue_title.setText(self.t('queue'))
+        self.table.setHorizontalHeaderLabels([
+            self.t('project'), self.t('direction'), self.t('status'), self.t('result')])
+        self.reference_label.setText(self.t('reference_label'))
+        self.shell_label.setText(self.t('shell_label'))
+        self.reference_edit.setPlaceholderText(self.t('reference_placeholder'))
+        self.shell_edit.setPlaceholderText(self.t('shell_placeholder'))
+        self.reference_btn.setText(self.t('browse'))
+        self.shell_btn.setText(self.t('browse'))
+        self.reverse_note.setText(self.t('reverse_note'))
+        self.open_btn.setText(self.t('open_folder'))
+        self.run_btn.setText(self.t('convert_queue'))
         self.footnote_label.setText(self.t('footnote'))
-        self.status_label.setText(self.t(self.last_status[0],**self.last_status[1]))
+        self.status_label.setText(self.t(self.last_status[0], **self.last_status[1]))
         self.refresh()
 
-    def set_status(self,key,**values):
-        self.last_status=(key,values);self.status_label.setText(self.t(key,**values))
+    def set_status(self, key, **values):
+        self.last_status = (key, values)
+        self.status_label.setText(self.t(key, **values))
 
     def open_shortcut_converter(self):
-        dialog=ShortcutConverterDialog(self,self.language)
-        dialog.exec()
+        ShortcutConverterDialog(self, self.language).exec()
 
     def apply_theme(self):
         self.setStyleSheet('''
@@ -350,100 +508,298 @@ class MainWindow(QMainWindow):
             QLabel#status{font-size:12px;color:#b8c4d2}
         ''')
 
-    def add_paths(self,paths):
-        added=0
-        known={os.path.normcase(os.path.abspath(x['path'])) for x in self.files}
+    def add_paths(self, paths):
+        if self.busy:
+            return
+        added = []
+        rejected = []
+        known = {os.path.normcase(os.path.realpath(rec['path'])) for rec in self.files}
         for raw in paths:
-            p=Path(raw)
-            if not p.is_file():continue
-            if p.suffix.lower() not in ('.prproj','.xml','.txt'):
+            path = Path(raw)
+            key = os.path.normcase(os.path.realpath(str(path)))
+            if key in known:
                 continue
-            key=os.path.normcase(os.path.abspath(str(p)))
-            if key in known:continue
-            self.files.append({'path':str(p),'state':'pending','output':''});known.add(key);added+=1
-        if added:self.set_status('added',n=added)
+            try:
+                direction = detect_project_direction(path)
+            except ProjectTypeError as exc:
+                rejected.append(f'{path.name}: {self.t("invalid_" + exc.code)}')
+                continue
+            except OSError as exc:
+                rejected.append(f'{path.name}: {exc}')
+                continue
+            self.files.append({
+                'path': str(path), 'direction': direction,
+                'reference': '', 'shell': '', 'state': 'pending',
+                'output': '', 'error': '',
+            })
+            added.append(len(self.files) - 1)
+            known.add(key)
+        if added:
+            self.set_status('added', n=len(added))
         self.refresh()
+        # Show the per-project settings immediately when a new FC file is added.
+        selected = next((i for i in added if self.files[i]['direction'] == FC_TO_PR),
+                        added[0] if added else None)
+        if selected is not None:
+            self.table.setCurrentCell(selected, 0)
+        if rejected:
+            lines = rejected[:10]
+            if len(rejected) > 10:
+                lines.append(self.t('invalid_more', n=len(rejected) - 10))
+            QMessageBox.warning(self, self.t('invalid_title'),
+                                self.t('invalid_header') + '\n' + '\n'.join(lines))
 
     def choose_files(self):
-        paths,_=QFileDialog.getOpenFileNames(self,self.t('add_dialog'),'',self.t('premiere_filter'))
-        if paths:self.add_paths(paths)
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, self.t('add_dialog'), '', self.t('project_filter'))
+        if paths:
+            self.add_paths(paths)
 
     def choose_output_dir(self):
-        current=self.output_edit.text().strip() or str(Path.home())
-        path=QFileDialog.getExistingDirectory(self,self.t('output_dialog'),current)
-        if path:self.output_edit.setText(path);self.settings.setValue('output_dir',path)
+        current = self.output_edit.text().strip() or str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, self.t('output_dialog'), current)
+        if path:
+            self.output_edit.setText(path)
+            self.settings.setValue('output_dir', path)
+
+    def selected_fc_record(self):
+        row = self.table.currentRow()
+        if 0 <= row < len(self.files) and self.files[row]['direction'] == FC_TO_PR:
+            return self.files[row]
+        return None
+
+    def choose_reference(self):
+        if self.selected_fc_record() is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, self.t('choose_reference_project'),
+            self.reference_edit.text().strip(), self.t('premiere_filter'))
+        if path:
+            self.reference_edit.setText(path)
+
+    def choose_shell(self):
+        if self.selected_fc_record() is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, self.t('choose_shell_project'),
+            self.shell_edit.text().strip(), self.t('premiere_filter'))
+        if path:
+            self.shell_edit.setText(path)
+
+    def update_reverse_panel(self, *args):
+        record = self.selected_fc_record()
+        self.reverse_panel.setVisible(record is not None)
+        if record is None:
+            return
+        self.reverse_heading.setText(self.t('reverse_heading', name=Path(record['path']).name))
+        self._loading_reverse = True
+        try:
+            for field, edit in (('reference', self.reference_edit),
+                                ('shell', self.shell_edit)):
+                value = record.get(field, '')
+                if edit.text() != value:
+                    edit.setText(value)
+        finally:
+            self._loading_reverse = False
+        for widget in (self.reference_edit, self.shell_edit,
+                       self.reference_btn, self.shell_btn):
+            widget.setEnabled(not self.busy)
+
+    def reverse_field_changed(self, field, value):
+        if self._loading_reverse or self.busy:
+            return
+        record = self.selected_fc_record()
+        if record is None or record[field] == value:
+            return
+        record[field] = value
+        if record['state'] != 'pending':
+            record['state'] = 'pending'
+            record['output'] = ''
+            record['error'] = ''
+        self.refresh()
 
     def remove_selected(self):
-        if self.busy:return
-        rows=sorted({x.row() for x in self.table.selectedIndexes()},reverse=True)
-        for r in rows:
-            if 0<=r<len(self.files):self.files.pop(r)
+        if self.busy:
+            return
+        rows = sorted({item.row() for item in self.table.selectedIndexes()}, reverse=True)
+        for row in rows:
+            if 0 <= row < len(self.files):
+                self.files.pop(row)
         self.refresh()
 
     def clear_queue(self):
-        if self.busy:return
-        self.files=[];self.progress.setValue(0);self.set_status('queue_cleared');self.refresh()
+        if self.busy:
+            return
+        self.files = []
+        self.progress.setValue(0)
+        self.set_status('queue_cleared')
+        self.refresh()
 
     def refresh(self):
-        self.table.setRowCount(len(self.files))
-        for r,rec in enumerate(self.files):
-            name=Path(rec['path']).name
-            self.table.setItem(r,0,QTableWidgetItem(name))
-            state=rec['state'];label=self.t({'pending':'state_pending','running':'state_running','done':'state_done','error':'state_error'}[state])
-            st=QTableWidgetItem(label)
-            if state=='done':st.setForeground(Qt.green)
-            if state=='error':st.setForeground(Qt.red);st.setToolTip(rec.get('error',''))
-            self.table.setItem(r,1,st)
-            out=QTableWidgetItem(Path(rec['output']).name if rec.get('output') else (rec.get('error','') if state=='error' else self.t('dash')))
-            if rec.get('output'):out.setToolTip(rec['output'])
-            elif state=='error':out.setToolTip(rec.get('error',''))
-            self.table.setItem(r,2,out)
-        n=len(self.files)
-        if self.language=='en': count_text=self.t('count_one' if n==1 else 'count_projects',n=n)
-        elif n==0: count_text=self.t('count_zero')
-        elif n%10==1 and n%100!=11: count_text=self.t('count_one',n=n)
-        elif 2<=n%10<=4 and not 12<=n%100<=14: count_text=self.t('count_few',n=n)
-        else: count_text=self.t('count_projects',n=n)
+        selected = self.table.currentRow()
+        self.table.blockSignals(True)
+        try:
+            self.table.setRowCount(len(self.files))
+            for row, record in enumerate(self.files):
+                name = Path(record['path']).name
+                project = QTableWidgetItem(name)
+                project.setToolTip(record['path'])
+                self.table.setItem(row, 0, project)
+                direction_key = 'dir_fc_pr' if record['direction'] == FC_TO_PR else 'dir_pr_fc'
+                self.table.setItem(row, 1, QTableWidgetItem(self.t(direction_key)))
+                state = record['state']
+                state_key = {'pending': 'state_pending', 'running': 'state_running',
+                             'done': 'state_done', 'error': 'state_error'}[state]
+                if (record['direction'] == FC_TO_PR and state == 'pending'
+                        and (not record.get('reference') or not record.get('shell'))):
+                    state_key = 'state_setup'
+                status = QTableWidgetItem(self.t(state_key))
+                if state == 'done':
+                    status.setForeground(Qt.green)
+                elif state == 'error':
+                    status.setForeground(Qt.red)
+                    status.setToolTip(record.get('error', ''))
+                elif state_key == 'state_setup':
+                    status.setToolTip(self.t('reverse_note'))
+                self.table.setItem(row, 2, status)
+                result = record.get('error', '') if state == 'error' else ''
+                result = result or (Path(record['output']).name if record.get('output') else self.t('dash'))
+                out = QTableWidgetItem(result)
+                out.setToolTip(record.get('error', '') or record.get('output', ''))
+                self.table.setItem(row, 3, out)
+        finally:
+            self.table.blockSignals(False)
+        if self.files:
+            desired = selected if 0 <= selected < len(self.files) else 0
+            if self.table.currentRow() != desired:
+                self.table.setCurrentCell(desired, 0)
+        n = len(self.files)
+        if self.language == 'en':
+            count_text = self.t('count_one' if n == 1 else 'count_projects', n=n)
+        elif n == 0:
+            count_text = self.t('count_zero')
+        elif n % 10 == 1 and n % 100 != 11:
+            count_text = self.t('count_one', n=n)
+        elif 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+            count_text = self.t('count_few', n=n)
+        else:
+            count_text = self.t('count_projects', n=n)
         self.count_label.setText(count_text)
-        self.run_btn.setEnabled(not self.busy and any(x['state'] in ('pending','error') for x in self.files))
-        self.add_btn.setEnabled(not self.busy);self.remove_btn.setEnabled(not self.busy);self.clear_btn.setEnabled(not self.busy);self.browse_btn.setEnabled(not self.busy);self.output_edit.setEnabled(not self.busy)
-        selected=self.table.currentRow()
-        self.open_btn.setEnabled(not self.busy and 0<=selected<len(self.files) and bool(self.files[selected].get('output')))
+        self.run_btn.setEnabled(not self.busy and any(
+            record['state'] in ('pending', 'error') for record in self.files))
+        for widget in (self.add_btn, self.remove_btn, self.clear_btn,
+                       self.browse_btn, self.output_edit, self.drop):
+            widget.setEnabled(not self.busy)
+        self.table.setEnabled(not self.busy)
+        row = self.table.currentRow()
+        self.open_btn.setEnabled(not self.busy and 0 <= row < len(self.files)
+                                 and bool(self.files[row].get('output')))
+        self.update_reverse_panel()
 
     def start_queue(self):
-        if self.busy:return
-        directory=Path(os.path.expanduser(self.output_edit.text().strip() or str(Path.home()/'FilmCraft Converted'))).resolve()
-        try:directory.mkdir(parents=True,exist_ok=True)
-        except Exception as exc:QMessageBox.critical(self,self.t('folder_error_title'),str(exc));return
-        self.settings.setValue('output_dir',str(directory));self.output_edit.setText(str(directory))
-        records=[(i,r.copy()) for i,r in enumerate(self.files) if r['state'] in ('pending','error')]
-        if not records:return
-        self.busy=True;self.progress.setRange(0,len(records));self.progress.setValue(0);self.completed=0;self.total=len(records);self.set_status('processing',done=0,total=self.total)
-        self.worker=ConversionWorker(records,directory,self.language);self.worker.fileStarted.connect(self.file_started);self.worker.fileSucceeded.connect(self.file_succeeded);self.worker.fileFailed.connect(self.file_failed);self.worker.queueFinished.connect(self.queue_finished);self.refresh();self.worker.start()
+        if self.busy:
+            return
+        pending = [(i, record.copy()) for i, record in enumerate(self.files)
+                   if record['state'] in ('pending', 'error')]
+        if not pending:
+            return
+        records = []
+        missing = []
+        for index, record in pending:
+            error = ''
+            if record['direction'] == FC_TO_PR:
+                name = Path(record['path']).name
+                for field, error_key in (('reference', 'no_reference'), ('shell', 'no_shell')):
+                    value = record[field].strip()
+                    if not value or not Path(value).is_file():
+                        error = self.t(error_key, name=name)
+                        break
+            if error:
+                self.files[index].update(state='error', error=error, output='')
+                missing.append((index, error))
+            else:
+                records.append((index, record))
+        if missing:
+            self.refresh()
+            self.table.setCurrentCell(missing[0][0], 0)
+            QMessageBox.warning(self, self.t('templates_needed_title'),
+                                self.t('templates_needed',
+                                       details='\n'.join(message for _, message in missing)))
+        if not records:
+            return
+        directory = Path(os.path.expanduser(
+            self.output_edit.text().strip() or str(Path.home() / 'Converted Projects'))).resolve()
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            QMessageBox.critical(self, self.t('folder_error_title'), str(exc))
+            return
+        self.settings.setValue('output_dir', str(directory))
+        self.output_edit.setText(str(directory))
+        self.busy = True
+        self.progress.setRange(0, len(records))
+        self.progress.setValue(0)
+        self.completed = 0
+        self.total = len(records)
+        self.set_status('processing', done=0, total=self.total)
+        self.worker = ConversionWorker(records, directory, self.language)
+        self.worker.fileStarted.connect(self.file_started)
+        self.worker.fileSucceeded.connect(self.file_succeeded)
+        self.worker.fileFailed.connect(self.file_failed)
+        self.worker.queueFinished.connect(self.queue_finished)
+        self.refresh()
+        self.worker.start()
 
-    def file_started(self,index):
-        self.files[index]['state']='running';self.set_status('converting',name=Path(self.files[index]['path']).name);self.refresh()
+    def file_started(self, index):
+        self.files[index]['state'] = 'running'
+        self.files[index]['output'] = ''
+        self.files[index]['error'] = ''
+        self.set_status('converting', name=Path(self.files[index]['path']).name)
+        self.refresh()
 
-    def file_succeeded(self,index,path,warnings):
-        self.files[index]['state']='done';self.files[index]['output']=path;self.files[index]['error']='';self.completed+=1;self.progress.setValue(self.completed)
-        self.set_status('done_warnings',name=Path(path).name,n=warnings) if warnings else self.set_status('done',name=Path(path).name);self.refresh()
+    def file_succeeded(self, index, path, messages):
+        record = self.files[index]
+        record['state'] = 'done'
+        record['output'] = path
+        record['error'] = ''
+        self.completed += 1
+        self.progress.setValue(self.completed)
+        if messages:
+            self.set_status('done_warnings', name=Path(path).name, n=messages)
+        else:
+            self.set_status('done', name=Path(path).name)
+        self.refresh()
 
-    def file_failed(self,index,error):
-        self.files[index]['state']='error';self.files[index]['error']=error;self.completed+=1;self.progress.setValue(self.completed);self.set_status('failed',name=Path(self.files[index]['path']).name);self.refresh()
+    def file_failed(self, index, error, output):
+        record = self.files[index]
+        record['state'] = 'error'
+        record['error'] = self.t('report_write_failed', error=error) if output else error
+        record['output'] = output
+        self.completed += 1
+        self.progress.setValue(self.completed)
+        self.set_status('failed', name=Path(record['path']).name)
+        self.refresh()
 
     def queue_finished(self):
-        self.busy=False;self.set_status('queue_finished');self.refresh()
+        if self.worker:
+            self.worker.wait()
+            self.worker = None
+        self.busy = False
+        self.set_status('queue_finished')
+        self.refresh()
 
     def open_selected_folder(self):
-        row=self.table.currentRow()
-        if 0<=row<len(self.files) and self.files[row].get('output'):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(self.files[row]['output']).parent)))
+        row = self.table.currentRow()
+        if 0 <= row < len(self.files) and self.files[row].get('output'):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(
+                str(Path(self.files[row]['output']).parent)))
 
-    def closeEvent(self,event):
+    def closeEvent(self, event):
         if self.busy:
-            answer=QMessageBox.question(self,self.t('close_running_title'),self.t('close_running_text'),QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
-            if answer!=QMessageBox.Yes:event.ignore();return
-            if self.worker:self.worker.terminate();self.worker.wait(2000)
+            QMessageBox.information(self, self.t('close_running_title'),
+                                    self.t('close_running_text'))
+            event.ignore()
+            return
         event.accept()
 
 

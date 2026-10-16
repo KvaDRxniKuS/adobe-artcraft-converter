@@ -1,0 +1,15 @@
+# Local project data and conversion results
+/uploads/
+*.fcproj
+*.prproj
+*_conversion_report.md
+*_shortcuts_report.md
+
+# Python and Windows build artifacts
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.spec
+/FilmCraftConverter.exe

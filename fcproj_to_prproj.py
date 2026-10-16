@@ -12,11 +12,19 @@ import json
 import os
 import re
 import sys
+import tempfile
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 TICKS = 254_016_000_000
+
+
+def same_file(first: Path, second: Path) -> bool:
+    """Catch equivalent paths, symlinks and (if present) hard links."""
+    if os.path.normcase(str(first.resolve())) == os.path.normcase(str(second.resolve())):
+        return True
+    return first.exists() and second.exists() and first.samefile(second)
 
 
 def norm_path(value: str | None) -> str:
@@ -314,6 +322,11 @@ class NativeWriter:
         return None
 
     def write(self, output: Path) -> list[str]:
+        # A mistyped output path must never destroy the FC project or either
+        # Premiere template (also when this writer is run from the CLI).
+        for source in (self.fc_path, self.reference_path, self.shell_path):
+            if source is not None and same_file(output, source):
+                raise ValueError('Выходной файл не должен совпадать с входным проектом или шаблоном Premiere.')
         if not self.sequence_by_name:
             raise ValueError('В Premiere-эталоне не найдены Sequence-объекты. Нужен populated project graph, не пустая оболочка.')
         fc_sequences = [x for x in self.items.values() if 'Sequence' in x.get('kind', {})]
@@ -350,7 +363,20 @@ class NativeWriter:
         # metadata and a fresh project GUID after graph alignment has succeeded.
         self._apply_blank_shell_metadata()
         output.parent.mkdir(parents=True, exist_ok=True)
-        self.tree.write(output, encoding='utf-8', xml_declaration=True)
+        # Write beside the destination, then replace it only after a complete
+        # serialization. A failed write must not truncate an existing project.
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='wb', prefix=f'.{output.stem}.', suffix='.tmp',
+                dir=output.parent, delete=False,
+            ) as temp:
+                temp_path = Path(temp.name)
+                self.tree.write(temp, encoding='utf-8', xml_declaration=True)
+            os.replace(temp_path, output)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
         self.warnings.insert(0, f'Обновлено существующих clip instances: {aligned}. Граф Sequence/Track взят из Premiere-эталона.')
         self.warnings.append('Ограничение первого writer: сохраняются только уже существующие в эталоне sequences/tracks/clips; новые медиа, sequence, дорожки, переходы и эффекты пока не создаются.')
         return self.warnings

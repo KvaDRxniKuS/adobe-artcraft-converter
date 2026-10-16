@@ -2,15 +2,16 @@
 
 **Native Windows desktop utility** for Premiere Pro project import and shortcut-file conversion. The UI is built with PySide6; it does not start a browser or web server. Interface language can be switched between Russian and English and is remembered between launches.
 
-> **Project-conversion status:** the desktop app currently converts Premiere `.prproj` → FilmCraft `.fcproj`. The reverse writer in `fcproj_to_prproj.py` is an experimental, graph-reference-based prototype; it is not integrated into the desktop queue and is not a general-purpose bidirectional project converter yet.
+> **Project-conversion status:** one desktop queue accepts Premiere `.prproj` and FilmCraft `.fcproj` projects and detects the direction from file content. FilmCraft → Premiere remains **experimental**: each FC item needs a matching populated Premiere reference and an empty Premiere shell. This is not a general-purpose reverse converter.
 
 ## Features
 
-- Native desktop UI with drag-and-drop, a project queue, output-folder selection, and RU/EN language switching.
+- Native desktop UI with drag-and-drop, one mixed project queue, automatic direction detection, output-folder selection, and RU/EN language switching.
 - Premiere Pro `.prproj` → FilmCraft `.fcproj` conversion, including supported sequences, tracks, clips, transitions, and selected effects.
+- Experimental FilmCraft `.fcproj` → Premiere `.prproj` conversion in the same queue, with per-project fields for a populated Premiere graph reference and an empty Premiere shell.
 - Premiere KYS XML ↔ FilmCraft keyboard-shortcut JSON conversion from the **Keyboard shortcuts** dialog or CLI.
 - Conversion reports list unsupported or unmapped items instead of guessing at command/effect equivalence.
-- Project media is referenced, not copied; moved media must be relinked in FilmCraft.
+- Project media is referenced, not copied; moved media must be relinked in the destination app.
 
 ## Windows: run from source
 
@@ -30,13 +31,14 @@ py -3 desktop_app.py
 
 `Start_Converter.bat` launches an existing EXE or runs the Python app if its dependencies are installed. The first build needs an internet connection to install dependencies. A Windows EXE must be built on Windows; no prebuilt binary is included in this repository.
 
-## Project conversion: Premiere → FilmCraft
+## Project conversion: shared queue
 
-1. Add one or more `.prproj` files by dropping them onto the window or using **Add projects**.
-2. Choose an output folder and click **Convert queue**.
-3. Each `.fcproj` is accompanied by a `*_conversion_report.md` report.
+1. Drag `.prproj` and/or `.fcproj` files onto the window, or click **Add projects**. Premiere XML (`.xml`/`.txt`) and FilmCraft project JSON (`.json`) are also accepted when their contents match a supported project format. The **Direction** column shows PR → FC or FC → PR; shortcut profiles are kept in their separate dialog.
+2. For **each FC → PR item**, select its row and provide a matching **populated Premiere reference** and an **empty Premiere shell** in the inline settings panel. PR → FC items need no templates. Both Premiere files must be supplied by you; none are bundled.
+3. Choose an output folder and click **Convert queue**. FC items without templates are marked as skipped; configured items (including PR → FC) continue. Output extensions follow the detected direction (`.fcproj` or `.prproj`), and each project gets a sibling `*_conversion_report.md`. Existing output/report names are not replaced; a numbered name is chosen instead.
+4. Read the reports and verify results in FilmCraft or Premiere Pro.
 
-Supported effects and transitions vary. Some effect parameters, animation/keyframes, masks, plugins, and version-specific settings may be approximated or omitted. Multistream audio routing uses Premiere's `SecondaryIndex`; FilmCraft must support the relevant multistream audio behavior. Review each report and verify the resulting project in FilmCraft.
+**Premiere → FilmCraft:** supported effects and transitions vary. Some effect parameters, animation/keyframes, masks, plugins, and version-specific settings may be approximated or omitted. Multistream audio routing uses Premiere's `SecondaryIndex`; FilmCraft must support the relevant multistream audio behavior.
 
 ## Keyboard shortcuts
 
@@ -52,24 +54,27 @@ py -3 shortcut_converter.py FilmCraft.json Premiere.kys `
 
 The bundled template files are **sanitized mapping catalogs**: they contain no user's assigned key combinations. For Premiere output, commands not represented in the FilmCraft mapping may remain unassigned; for FilmCraft output, unmapped commands are reported. If multiple FilmCraft commands map to one Premiere command, only the first is written and the conflict is reported. The crosswalk is intentionally conservative and does not fuzzy-match command names. If you use a personal shortcut profile as an input, keep it private and do not commit it.
 
-## Experimental reverse writer
+## FilmCraft → Premiere limitations (experimental)
 
-`fcproj_to_prproj.py` can update an existing Premiere graph reference using a FilmCraft project, and takes an empty Premiere shell for build metadata:
+The populated reference must contain the **same sequence names, track and clip counts, and media** as the FC project; the empty shell supplies build metadata for your Premiere version. The inline fields are stored **per FC row**, so different projects may use different templates. The native writer's diagnostics in reports are currently in Russian even when the interface is in English.
+
+The CLI uses the same experimental writer:
 
 ```powershell
 py -3 fcproj_to_prproj.py project.fcproj output.prproj `
   --reference populated-reference.prproj --shell empty-premiere-shell.prproj
 ```
 
-This is **not a general reverse converter**. The FilmCraft project must align with the reference's sequence names, track counts, clip counts, and available media graph. Creating new Premiere media/master-clip/sequence/track graphs, and reverse-mapping effects/transitions, is not implemented. XML parsing and object-reference checks alone do not prove Premiere will open the result. Validate in Premiere Pro before relying on an output.
+This is **not a general reverse converter**. Creating new Premiere media/master-clip/sequence/track graphs, and reverse-mapping effects/transitions, is not implemented. XML parsing and object-reference checks alone do not prove Premiere will open the result. Work on copies of your projects and validate in Premiere Pro before relying on an output.
 
 ## Development checks
 
 ```powershell
-py -3 -m py_compile desktop_app.py prproj_to_fcproj.py fcproj_to_prproj.py shortcut_converter.py
+py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py reverse_project.py shortcut_converter.py
+py -3 -m unittest discover -s tests -v
 ```
 
-The PySide6 GUI should also be smoke-tested on Windows. In the development sandbox used for this source snapshot, the GUI could not be launched because a system Qt dependency (`libxkbcommon`) was missing; this environment limitation is not a Windows build test.
+The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premiere projects. Headless UI tests are skipped when system Qt libraries are unavailable (as in the development sandbox); this is not a Windows build or Premiere compatibility test.
 
 ## Repository hygiene and privacy
 
@@ -84,15 +89,16 @@ The PySide6 GUI should also be smoke-tested on Windows. In the development sandb
 
 **Нативная настольная утилита для Windows**: импорт проектов Premiere и конвертация файлов горячих клавиш. Интерфейс на PySide6, без браузера и веб-сервера. Язык переключается между русским и английским и запоминается между запусками.
 
-> **Состояние конвертации проектов:** настольное приложение сейчас преобразует Premiere `.prproj` → FilmCraft `.fcproj`. Обратный writer в `fcproj_to_prproj.py` — экспериментальный прототип, работающий от графа-эталона. Он не подключён к очереди приложения и пока не является универсальным двусторонним конвертером проектов.
+> **Состояние конвертации проектов:** одна очередь принимает Premiere `.prproj` и FilmCraft `.fcproj` и определяет направление по содержимому файла. FilmCraft → Premiere остаётся **экспериментальным**: для каждого FC-проекта нужны заполненный эталон Premiere и пустая оболочка. Это не универсальная обратная конвертация.
 
 ## Возможности
 
-- Нативный интерфейс: drag-and-drop, очередь проектов, выбор папки результата, переключатель RU/EN.
+- Нативный интерфейс: drag-and-drop, единая очередь разных проектов с автоматическим определением направления, выбор папки результата, RU/EN.
 - Конвертация `.prproj` → `.fcproj` с поддержкой части последовательностей, дорожек, клипов, переходов и эффектов.
+- Экспериментальная конвертация FilmCraft `.fcproj` → Premiere `.prproj` в той же очереди: эталон Premiere и пустая оболочка задаются отдельно для каждого FC-проекта.
 - Конвертация Premiere KYS XML ↔ FilmCraft JSON для горячих клавиш через окно приложения или CLI.
 - Отчёты перечисляют неподдерживаемые и несопоставленные элементы; конвертер не угадывает похожие команды.
-- Исходные медиа не копируются. Перемещённые файлы нужно перепривязать в FilmCraft.
+- Исходные медиа не копируются. Перемещённые файлы нужно перепривязать в целевой программе.
 
 ## Запуск из исходников в Windows
 
@@ -112,13 +118,14 @@ py -3 desktop_app.py
 
 `Start_Converter.bat` запускает существующий EXE или исходный код, если зависимости установлены. Для первой сборки нужен интернет, чтобы установить зависимости. EXE нужно собирать на Windows; готового бинарника в репозитории нет.
 
-## Проект Premiere → FilmCraft
+## Конвертация проектов: общая очередь
 
-1. Перетащите один или несколько `.prproj` в окно или нажмите **Добавить проекты**.
-2. Выберите папку результата и нажмите **Конвертировать очередь**.
-3. Рядом с каждым `.fcproj` создаётся отчёт `*_conversion_report.md`.
+1. Перетащите `.prproj` и/или `.fcproj` в окно либо нажмите **Добавить проекты**. Premiere XML (`.xml`/`.txt`) и JSON проекта FilmCraft (`.json`) тоже принимаются, если содержимое соответствует формату проекта. Столбец **Направление** показывает PR → FC или FC → PR; профили горячих клавиш остаются в отдельном окне.
+2. Для **каждого элемента FC → PR** выделите строку и укажите в появившейся панели **заполненный эталон Premiere** и **пустую оболочку Premiere**. Для PR → FC шаблоны не нужны. Эти файлы нужно предоставить самостоятельно, в репозитории их нет.
+3. Выберите папку вывода и нажмите **Конвертировать очередь**. FC-проекты без шаблонов будут помечены как пропущенные, остальные (включая PR → FC) продолжат обработку. Формат результата (`.fcproj` или `.prproj`) определяется автоматически; рядом создаётся `*_conversion_report.md`. Существующие проекты и отчёты не перезаписываются — выбирается имя с номером.
+4. Прочитайте отчёты и проверьте результаты в FilmCraft или Premiere Pro.
 
-Поддержка эффектов и переходов ограничена: отдельные параметры, ключевые кадры/анимация, маски, плагины и настройки конкретных версий могут переноситься приближённо или пропускаться. Маршрутизация многопоточного аудио использует Premiere `SecondaryIndex`; FilmCraft должен поддерживать соответствующее поведение. Проверяйте отчёт и результат в FilmCraft.
+**Premiere → FilmCraft:** поддержка эффектов и переходов ограничена: отдельные параметры, ключевые кадры/анимация, маски, плагины и настройки версий могут переноситься приближённо или пропускаться. Маршрутизация многопоточного аудио использует Premiere `SecondaryIndex`; FilmCraft должен поддерживать соответствующее поведение.
 
 ## Горячие клавиши
 
@@ -126,17 +133,20 @@ py -3 desktop_app.py
 
 Включённые шаблоны — **очищенные каталоги соответствий** без пользовательских назначений. В выходном KYS команды, не покрытые таблицей FilmCraft, могут остаться без клавиш; неподдерживаемые команды указываются в отчёте. Если несколько FilmCraft-команд сопоставились одной команде Premiere, переносится первая, а конфликт попадает в отчёт. Сопоставление намеренно консервативное. Не добавляйте личные профили горячих клавиш в публичный репозиторий.
 
-## Экспериментальный обратный writer
+## Ограничения FilmCraft → Premiere (экспериментально)
 
-`fcproj_to_prproj.py` может обновить существующий граф Premiere из FilmCraft-проекта; пустая оболочка Premiere передаётся отдельно для метаданных версии. Команда приведена выше. Это **не универсальная обратная конвертация**: имена последовательностей, число дорожек/клипов и медиа должны соответствовать графу-эталону. Создание новых графов медиа, master clips, последовательностей и дорожек, а также обратный перенос эффектов/переходов пока не реализованы. Проверка XML и ссылок не доказывает, что Premiere откроет файл; проверяйте его в Premiere Pro.
+Заполненный эталон должен содержать **совпадающие имена последовательностей, число дорожек и клипов, а также медиа**. Пустая оболочка предоставляет метаданные версии Premiere. Параметры задаются **для каждой строки FC отдельно**. После конвертации обязательно откройте результат в Premiere Pro для проверки.
+
+CLI использует тот же экспериментальный writer; пример команды приведён выше. Это **не универсальная обратная конвертация**: создание новых графов медиа, master clips, последовательностей и дорожек, а также обратный перенос эффектов/переходов пока не реализованы. Проверка XML и ссылок не доказывает, что Premiere откроет файл. Работайте с копиями проектов и проверяйте результат в Premiere Pro.
 
 ## Проверки разработки
 
 ```powershell
-py -3 -m py_compile desktop_app.py prproj_to_fcproj.py fcproj_to_prproj.py shortcut_converter.py
+py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py reverse_project.py shortcut_converter.py
+py -3 -m unittest discover -s tests -v
 ```
 
-GUI также нужно проверять на Windows. В среде, где подготовлен этот снимок исходников, Qt GUI не запускался из-за отсутствующей системной библиотеки `libxkbcommon`; это ограничение окружения, а не проверка Windows-сборки.
+GUI также нужно проверить на Windows с реальными проектами FilmCraft/Premiere. Если системных библиотек Qt нет, headless UI-тесты пропускаются (как в среде разработки); это не проверка Windows-сборки и совместимости с Premiere.
 
 ## Чистота репозитория и приватность
 
