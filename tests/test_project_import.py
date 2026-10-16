@@ -9,7 +9,7 @@ from unittest.mock import patch
 from project_import import (FC_TO_PR, PR_TO_FC, ProjectTypeError,
                             convert_queued_project, detect_project_direction,
                             next_output_path)
-from test_reverse_writer import REFERENCE, SHELL
+from test_reverse_writer import REFERENCE, SHELL, graphic_text_clip
 
 
 class ProjectImportTests(unittest.TestCase):
@@ -95,6 +95,28 @@ class ProjectImportTests(unittest.TestCase):
         self.assertNotEqual(output, second_output)
         self.assertEqual(self.premiere.read_text(encoding='utf-8'), REFERENCE)
         self.assertEqual(self.shell.read_text(encoding='utf-8'), SHELL)
+
+    def test_fc_graphic_in_txt_input_generates_png_in_queue_output(self):
+        try:
+            from PIL import Image  # noqa: F401 - import checks the installed runtime dependency
+        except ImportError:
+            self.skipTest('Pillow is not installed')
+        project = json.loads(self.filmcraft.read_text(encoding='utf-8'))
+        project['project']['items']['314'] = {'id': 314, 'kind': {
+            'Graphic': {'width': 320, 'height': 180, 'rate': {'num': 25, 'den': 1}},
+        }}
+        sequence = project['project']['items']['1']['kind']['Sequence']
+        sequence['video_tracks'] = [{'items': [graphic_text_clip(315, 'Пример', 0)]}]
+        source = self.base / 'graphic.fcproj.txt'
+        source.write_text(json.dumps(project), encoding='utf-8')
+        self.assertEqual(detect_project_direction(source), FC_TO_PR)
+        output, _ = convert_queued_project({'path': str(source), 'direction': FC_TO_PR},
+                                           self.output_dir)
+        self.assertTrue(output.is_file())
+        self.assertEqual(len(list(self.output_dir.glob('*_graphic_*.png'))), 1)
+        report = output.with_name(output.stem + '_conversion_report.md')
+        self.assertIn('растровый PNG', report.read_text(encoding='utf-8'))
+        self.assertEqual(json.loads(source.read_text(encoding='utf-8')), project)
 
     def test_optional_missing_shell_rejected_without_touching_fc(self):
         with self.assertRaisesRegex(ValueError, 'оболочка'):

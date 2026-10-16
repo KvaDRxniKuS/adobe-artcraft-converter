@@ -9,6 +9,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
+try:
+    from PIL import Image
+except ImportError:  # Keep non-Graphic tests runnable before requirements are installed.
+    Image = None
+
 from direct_fc_to_prproj import DirectWriter, GraphIndex
 from fcproj_to_prproj import NativeWriter, TICKS, main as reverse_cli, same_file
 from prproj_to_fcproj import Converter
@@ -87,6 +92,18 @@ def project_document(video_path: str, audio_path: str) -> dict:
     }}
 
 
+def graphic_text_clip(clip_id: int, text: str, start: int) -> dict:
+    clip = fc_clip(clip_id, 314, 'Generated title', start, TICKS)
+    def param(value, variant):
+        return {'value': {variant: value}}
+    clip['effects'] = [{'effect': 'graphic_text', 'enabled': True, 'params': {
+        'text': param(text, 'Text'), 'font': param('DejaVu Sans', 'Text'),
+        'size': param(36.0, 'Float'), 'position': param({'x': 16, 'y': 24}, 'Vec2'),
+        'fill_color': param([1., .5, 0., 1.], 'Color'),
+    }}]
+    return clip
+
+
 class DirectWriterTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -105,6 +122,17 @@ class DirectWriterTests(unittest.TestCase):
 
     def save_fc(self):
         self.source.write_text(json.dumps(self.document), encoding='utf-8')
+
+    def add_graphic(self, *, clips=1):
+        self.document['project']['items']['314'] = {
+            'id': 314, 'name': 'Graphic canvas', 'kind': {'Graphic': {
+                'width': 320, 'height': 180, 'rate': {'num': 25, 'den': 1},
+            }},
+        }
+        track = self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][2]
+        track['items'] = [graphic_text_clip(315 + i, 'Пример' if i == 0 else 'Second',
+                                           i * 2 * TICKS) for i in range(clips)]
+        self.save_fc()
 
     @staticmethod
     def read_root(path):
@@ -151,6 +179,91 @@ class DirectWriterTests(unittest.TestCase):
         self.assertEqual(video_clips[0]['link'],
                          seq['Main']['audio_tracks'][0]['items'][0]['link'])
         self.assertIsNotNone(video_clips[0]['link'])
+
+    def test_existing_png_media_uses_still_stream_metadata(self):
+        still = self.base / 'still.png'
+        still.write_bytes(b'placeholder image for graph-only test')
+        media = self.document['project']['items']['1']['kind']['Media']
+        media['media']['File']['path'] = str(still)
+        media['info']['kind'] = 'Still'
+        media['info']['video']['has_alpha'] = True
+        media['info']['audio_streams'] = []
+        self.save_fc()
+        DirectWriter(self.source).write(self.output)
+        root = self.read_root(self.output)
+        image = next(m for m in root.findall('Media')
+                     if m.findtext('RelativePath') == str(still))
+        stream = GraphIndex(root).by_id[image.find('VideoStream').get('ObjectRef')]
+        self.assertEqual(image.findtext('Infinite'), 'true')
+        self.assertEqual(stream.findtext('IsStill'), 'true')
+        self.assertEqual(stream.findtext('AlphaType'), '1')
+        self.assertEqual(stream.findtext('CodecType'), '1380013856')
+        self.assertIsNone(stream.find('IgnoreAlpha'))
+        self.assertEqual(len(root.findall('VideoClipTrackItem')), 4)
+
+    @unittest.skipIf(Image is None, 'Pillow is not installed')
+    def test_graphic_text_exports_per_clip_png_without_losing_timeline(self):
+        self.add_graphic(clips=2)
+        report, warnings = convert_reverse_project(self.source, self.output)
+        pngs = list(self.base.glob('result_graphic_*.png'))
+        self.assertEqual(len(pngs), 2)
+        for png in pngs:
+            with Image.open(png) as image:
+                self.assertEqual(image.size, (320, 180))
+                self.assertEqual(image.mode, 'RGBA')
+                self.assertIsNotNone(image.getchannel('A').getbbox())
+        root = self.read_root(self.output)
+        self.assertEqual(len(root.findall('Media')), 4)
+        self.assertEqual(len(root.findall('VideoClipTrackItem')), 6)
+        generated = [m for m in root.findall('Media')
+                     if (m.findtext('RelativePath') or '').endswith('.png')]
+        self.assertEqual(len(generated), 2)
+        self.assertTrue(all(not Path(m.findtext('RelativePath')).is_absolute()
+                            for m in generated))
+        self.assertTrue(all((self.output.parent / m.findtext('RelativePath')).is_file()
+                            for m in generated))
+        by_id = GraphIndex(root).by_id
+        self.assertTrue(all(by_id[m.find('VideoStream').get('ObjectRef')].findtext('IsStill')
+                            == 'true' for m in generated))
+        self.assertTrue(all(by_id[m.find('VideoStream').get('ObjectRef')].findtext('AlphaType')
+                            == '1' for m in generated))
+        doc = Converter(self.output).convert(self.base / 'graphic_roundtrip.fcproj')
+        main = next(i['kind']['Sequence'] for i in doc['project']['items'].values()
+                    if i.get('name') == 'Main' and 'Sequence' in i['kind'])
+        self.assertEqual([(c['start'], c['duration']) for c in main['video_tracks'][2]['items']],
+                         [(0, TICKS), (2*TICKS, TICKS)])
+        self.assertIn('растровый PNG', report.read_text(encoding='utf-8'))
+        self.assertTrue(any('текст не редактируется' in m for m in warnings))
+        self.assertFalse(any('graphic_text' in m and 'не перенесено' in m for m in warnings))
+
+    @unittest.skipIf(Image is None, 'Pillow is not installed')
+    def test_generated_graphic_assets_are_removed_if_project_write_fails(self):
+        self.add_graphic()
+        self.output.write_bytes(b'keep earlier output')
+        with patch('direct_fc_to_prproj.os.replace', side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError, 'disk full'):
+                DirectWriter(self.source).write(self.output)
+        self.assertEqual(self.output.read_bytes(), b'keep earlier output')
+        self.assertFalse(list(self.base.glob('result_graphic_*.png')))
+        self.assertFalse(list(self.base.glob('*.tmp')))
+
+    def test_graphic_missing_dependency_has_an_actionable_error(self):
+        self.add_graphic()
+        with patch('direct_fc_to_prproj.render_graphic',
+                   side_effect=RuntimeError('Установите Pillow из requirements.txt')):
+            with self.assertRaisesRegex(RuntimeError, 'Pillow'):
+                DirectWriter(self.source).write(self.output)
+        self.assertFalse(self.output.exists())
+        self.assertFalse(list(self.base.glob('result_graphic_*.png')))
+
+    def test_unused_graphic_is_reported_without_creating_an_asset(self):
+        self.add_graphic()
+        self.document['project']['items']['10']['kind']['Sequence']['video_tracks'][2]['items'] = []
+        self.save_fc()
+        warnings = DirectWriter(self.source).write(self.output)
+        self.assertTrue(any('неиспользуемый Graphic' in m for m in warnings))
+        self.assertEqual(len(self.read_root(self.output).findall('Media')), 2)
+        self.assertFalse(list(self.base.glob('result_graphic_*.png')))
 
     def test_nested_sequence_reference_has_no_dummy_source(self):
         nested = {'id': 31, 'name': 'Second',

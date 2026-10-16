@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fcproj_to_prproj import TICKS, same_file
+from graphic_raster import render_graphic
 from premiere_seed import load_seed_xml
 from prproj_to_fcproj import Converter as ForwardConverter
 
@@ -34,6 +35,8 @@ GUID = re.compile(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z')
 IDENTITY_TAGS = frozenset({'ID', 'ClipID', 'FileKey', 'ImplementationID',
                            'DefMappingID', 'PreviewFormatIdentifier'})
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.aif', '.aiff', '.m4a', '.flac', '.aac', '.ogg'}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif', '.webp'}
+STILL_DURATION = 10973491200000000
 
 
 @dataclass(frozen=True)
@@ -261,6 +264,8 @@ class DirectWriter:
         self.sequence_handles: dict[str, MediaHandle] = {}
         self.plans: list[SequencePlan] = []
         self.media_needed_span: dict[str, int] = {}
+        self.generated_assets: dict[Path, bytes] = {}
+        self.output_path: Path | None = None
 
     @staticmethod
     def _set(node: ET.Element, path: str, value: object) -> None:
@@ -338,18 +343,22 @@ class DirectWriter:
                     for ref in list(refs)[channels:]:
                         refs.remove(ref)
 
-    def _make_media(self, item_id: str, item: dict) -> None:
+    def _make_media(self, item_id: str, item: dict, *, generated: bool = False) -> None:
         path = self._media_path(item)
         name = str(item.get('name') or Path(path.replace('\\', '/')).name or 'Media')
         if not path:
             raise ValueError(f'Медиа «{name}» без пути: создание офлайн-источника Premiere пока не поддерживается.')
         candidate = Path(path)
-        if not candidate.is_absolute() and (self.fc_path.parent / candidate).is_file():
+        if not generated and not candidate.is_absolute() and (self.fc_path.parent / candidate).is_file():
             path = str((self.fc_path.parent / candidate).resolve())
         raw_info = item.get('kind', {}).get('Media', {}).get('info') or {}
         info = raw_info if isinstance(raw_info, dict) else {}
         video = info.get('video') if isinstance(info.get('video'), dict) else None
         audio_streams = info.get('audio_streams') if isinstance(info.get('audio_streams'), list) else []
+        suffix = Path(path.replace('\\', '/')).suffix.lower()
+        media_kind = str(info.get('kind') or '').casefold()
+        is_still = generated or media_kind == 'still' or (
+            not media_kind and suffix in IMAGE_EXTENSIONS)
         if not video and not audio_streams:
             if Path(path).suffix.lower() in AUDIO_EXTENSIONS:
                 audio_streams = [{'sample_rate': 48000, 'channels': 2}]
@@ -396,6 +405,29 @@ class DirectWriter:
             vs = next(value for value in project_item.values() if value.tag == 'VideoStream')
             self._set(vs, 'FrameRect', f'0,0,{width},{height}')
             self._set(vs, 'FrameRate', self._period(video.get('frame_rate'), 10594584000))
+            if is_still:
+                # Match the native still-image layout rather than carrying MP4
+                # codec/alpha metadata into a PNG (including FC's own stills).
+                self._set(media, 'Infinite', 'true')
+                self._set(vs, 'IsStill', 'true')
+                self._set(vs, 'Duration', STILL_DURATION)
+                self._set(vs, 'CodecType', 1380013856)
+                self._set(vs, 'PARIsUncertain', 'true')
+                self._set(vs, 'FieldTypeIsUncertain', 'true')
+                if generated or video.get('has_alpha'):
+                    self._set(vs, 'AlphaType', 1)
+                else:
+                    alpha = vs.find('AlphaType')
+                    if alpha is not None:
+                        vs.remove(alpha)
+                for tag in ('IgnoreAlpha', 'OriginalColorSpace',
+                            'OriginalImageOrientationType'):
+                    old = vs.find(tag)
+                    if old is not None:
+                        vs.remove(old)
+                for value in project_item.values():
+                    if value.tag == 'VideoMediaSource':
+                        self._set(value, 'OriginalDuration', STILL_DURATION)
         else:
             stream = media.find('VideoStream')
             if stream is not None:
@@ -423,16 +455,57 @@ class DirectWriter:
                                           project_item[self.graph.source['video']].get('ObjectID') if video else None,
                                           project_item[self.graph.source['audio']].get('ObjectID') if audio_streams else None,
                                           name, width, height, channels)
-        if not Path(path).is_file():
+        if not generated and not Path(path).is_file():
             self.warnings.append(f'«{name}»: проверьте путь к исходному файлу в Premiere.')
+
+    def _make_graphic_media(self, item_id: str, item: dict, clip: dict,
+                            width: int, height: int) -> MediaHandle:
+        if self.output_path is None:
+            raise RuntimeError('Output path is not configured')
+        graphic = item['kind']['Graphic']
+        if not isinstance(graphic, dict):
+            raise ValueError(f'Graphic {item_id} не содержит параметров холста.')
+        png, messages, text_drawn = render_graphic(
+            graphic, clip.get('effects') or [], width, height)
+        filename = (f'{self.output_path.stem}_graphic_'
+                    f'{len(self.generated_assets) + 1}_{uuid.uuid4().hex}.png')
+        path = self.output_path.parent / filename
+        self.generated_assets[path] = png
+        name = str(clip.get('name') or item.get('name') or 'Graphic')
+        pseudo_id = f'Graphic:{item_id}:{uuid.uuid4().hex}'
+        pseudo_item = {'name': name, 'kind': {'Media': {
+            # The Premiere seed uses RelativePath. Keep generated assets portable
+            # with the .prproj when both files are moved together.
+            'media': {'File': {'path': filename}},
+            'info': {'kind': 'Still', 'duration': max(1,
+                int(clip.get('source_in') or 0) + int(clip.get('duration') or 0)),
+                     'video': {'width': graphic.get('width') or width,
+                               'height': graphic.get('height') or height,
+                               'frame_rate': graphic.get('rate')},
+                     'audio_streams': []},
+        }}}
+        self._make_media(pseudo_id, pseudo_item, generated=True)
+        self.warnings.append(f'«{name}»: Graphic {item_id} сохранён как растровый PNG '
+                             'рядом с проектом; текст не редактируется как титр Premiere.')
+        if not text_drawn:
+            self.warnings.append(f'«{name}»: содержимое Graphic не удалось отобразить; '
+                                 'создан прозрачный PNG, проверьте этот клип.')
+        self.warnings.extend(f'«{name}»: {message}' for message in messages)
+        return self.media[pseudo_id]
 
     def _make_clip(self, kind: str, clip: dict, sequence_name: str,
                    width: int, height: int) -> ET.Element:
         raw_id = str(clip.get('item'))
         media_id = self._item_key(clip.get('item'))
-        if media_id not in self.media:
+        source = self.items.get(media_id)
+        is_graphic = source is not None and 'Graphic' in source.get('kind', {})
+        handle = self.media.get(media_id)
+        if handle is None and is_graphic:
+            if kind != 'video':
+                raise ValueError(f'«{sequence_name}»: Graphic {raw_id} нельзя поместить на аудиодорожку.')
+            handle = self._make_graphic_media(media_id, source, clip, width, height)
+        if handle is None:
             clip_name = clip.get('name') or 'Без имени'
-            source = self.items.get(media_id)
             if source is None:
                 raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
                                  f'отсутствующее медиа {raw_id}: элемента с таким ключом '
@@ -445,7 +518,6 @@ class DirectWriter:
             raise ValueError(f'«{sequence_name}»: клип «{clip_name}» ссылается на '
                              f'элемент {raw_id} «{source.get("name", "") }» с kind={kinds}; '
                              'FC → PR пока не поддерживает этот тип источника.')
-        handle = self.media[media_id]
         source_id = handle.video_source if kind == 'video' else handle.audio_source
         if not source_id:
             raise ValueError(f'«{sequence_name}»: медиа «{handle.name}» не содержит {kind}-потока.')
@@ -470,10 +542,12 @@ class DirectWriter:
                     for effect in (ForwardConverter.intrinsic_video(width, height)
                                    if kind == 'video' else ForwardConverter.intrinsic_audio())}
         effects = [effect for effect in (clip.get('effects') or [])
-                   if (not isinstance(effect, dict)
-                       or effect.get('effect') not in defaults
-                       or effect.get('params') != defaults[effect['effect']]
-                       or effect.get('enabled') is False)]
+                   if not (is_graphic and isinstance(effect, dict)
+                           and effect.get('effect') == 'graphic_text')
+                   and (not isinstance(effect, dict)
+                        or effect.get('effect') not in defaults
+                        or effect.get('params') != defaults[effect['effect']]
+                        or effect.get('enabled') is False)]
         if effects:
             self.warnings.append(f'«{sequence_name}» / «{clip.get("name", handle.name)}»: '
                                  f'{len(effects)} эффект(ов) или изменённых параметров '
@@ -659,6 +733,7 @@ class DirectWriter:
 
     def write(self, output: Path) -> list[str]:
         output = Path(output)
+        self.output_path = output.absolute()
         for source in (self.fc_path, self.shell_path):
             if source is not None and same_file(output, source):
                 raise ValueError('Результат не должен перезаписывать исходный проект или пустую оболочку.')
@@ -687,7 +762,10 @@ class DirectWriter:
         for item_id, item in self.items.items():
             if 'Sequence' in item.get('kind', {}):
                 self._create_sequence(item_id, item)
-            elif 'Media' not in item.get('kind', {}):
+            elif 'Graphic' in item.get('kind', {}) and item_id not in self.media_needed_span:
+                self.warnings.append(f'«{item.get("name", item_id)}»: '
+                                     'неиспользуемый Graphic без клипа не добавлен в Premiere.')
+            elif not ({'Media', 'Graphic'} & item.get('kind', {}).keys()):
                 self.warnings.append(f'«{item.get("name", item_id)}»: '
                                      'неподдерживаемый тип элемента не добавлен в Premiere.')
 
@@ -719,16 +797,28 @@ class DirectWriter:
         payload = gzip.compress(xml, compresslevel=6, mtime=0)
         output.parent.mkdir(parents=True, exist_ok=True)
         temp_path = None
+        created_assets: list[Path] = []
         try:
+            # Exclusive creation prevents overwriting user files. If anything
+            # fails before the .prproj is installed, remove only our new PNGs.
+            for path, png in self.generated_assets.items():
+                with path.open('xb') as stream:
+                    created_assets.append(path)
+                    stream.write(png)
             with tempfile.NamedTemporaryFile(mode='wb', dir=output.parent,
                                              prefix=f'.{output.stem}.', suffix='.tmp',
                                              delete=False) as stream:
                 temp_path = Path(stream.name)
                 stream.write(payload)
             os.replace(temp_path, output)
+        except BaseException:
+            for path in created_assets:
+                path.unlink(missing_ok=True)
+            raise
         finally:
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
+        media_count += len(self.generated_assets)
         self.warnings.insert(0, f'Созданы {len(sequences)} последовательностей и '
                                 f'{media_count} медиа-объектов без заполненного эталона Premiere.')
         return self.warnings

@@ -11,7 +11,7 @@
 - Experimental direct FilmCraft `.fcproj` → Premiere `.prproj` conversion in the same queue, creating media, sequences, tracks and clips from FC references; an empty Premiere shell is optional.
 - Premiere KYS XML ↔ FilmCraft keyboard-shortcut JSON conversion from the **Keyboard shortcuts** dialog or CLI.
 - Conversion reports list unsupported or unmapped items instead of guessing at command/effect equivalence.
-- Project media is referenced, not copied; moved media must be relinked in the destination app.
+- Original project media is referenced, not copied; moved media must be relinked. FilmCraft-generated Graphic clips produce separate raster PNG assets beside the Premiere project.
 
 ## Windows: run from source
 
@@ -26,7 +26,7 @@ py -3 desktop_app.py
 
 1. Install Python 3.10+ with the Python Launcher (`py`).
 2. Run `Build_Windows_EXE.bat`.
-3. The script installs PySide6/PyInstaller, builds `FilmCraftConverter.exe`, and copies it beside the source files.
+3. The script installs PySide6, Pillow and PyInstaller, builds `FilmCraftConverter.exe`, and copies it beside the source files.
 4. Launch the EXE. Python and a browser are not required to run the built app.
 
 `Start_Converter.bat` prefers a Python source launch so it can check for source updates first. If Python/PySide6 is unavailable, it falls back to an existing EXE, which **is not automatically updated**. The first EXE build needs an internet connection to install dependencies. A Windows EXE must be built on Windows; no prebuilt binary is included in this repository.
@@ -37,7 +37,7 @@ With Python 3.10+ installed, the batch file uses `update_converter.py` to inspec
 
 Versions are cached under `%LOCALAPPDATA%\FilmCraftConverter\source-updates\versions\<commit>`. Your checkout, launcher, EXE, user projects, and shortcut profiles are **not overwritten**. If GitHub is offline/rate-limited or an update fails validation, the last cached version is launched (or the local source if none is cached). Set `FILMCRAFT_SKIP_UPDATE=1` before launching to run the local source without a network check. The check is limited to 40 branches because unauthenticated GitHub API requests are rate-limited; when this limit is exceeded, it falls back safely.
 
-This is a **source-only** updater: installing PySide6 is still your responsibility (`py -3 -m pip install -r requirements.txt`). The EXE is neither downloaded nor rebuilt automatically; to update a standalone EXE, rebuild it with `Build_Windows_EXE.bat` or publish a release binary separately.
+This is a **source-only** updater: dependencies (PySide6 and Pillow for Graphic rasterization) are not installed automatically. After updating sources, run `py -3 -m pip install -r requirements.txt` if they are missing. The EXE is neither downloaded nor rebuilt automatically; to update a standalone EXE, rebuild it with `Build_Windows_EXE.bat` or publish a release binary separately.
 
 ## Project conversion: shared queue
 
@@ -64,7 +64,7 @@ The bundled template files are **sanitized mapping catalogs**: they contain no u
 
 ## FilmCraft → Premiere limitations (experimental)
 
-The writer constructs a native-style **media → master clip → sequence → track → clip** reference graph from FC items, assigning fresh Premiere object IDs. It handles multiple sequences, tracks, reused media, basic video/audio timings and sequences nested by unambiguous name. Media are **linked by path, never copied**. It starts with a bundled, neutral graph layout (see the MIT attribution in `premiere_seed.py`), not a project containing your media. An optional empty shell only supplies two build-version strings; it is **not** a guarantee that the graph matches your Premiere version. Diagnostics in the report are currently in Russian even in the English UI.
+The writer constructs a native-style **media → master clip → sequence → track → clip** reference graph from FC items, assigning fresh Premiere object IDs. It handles multiple sequences, tracks, reused media, basic video/audio timings and sequences nested by unambiguous name. Original media are **linked by path, never copied**. Each referenced FilmCraft `Graphic` clip generates its own transparent PNG with supported `graphic_text` drawn approximately from the clip parameters. PNGs are saved next to the `.prproj`; keep them with the project. They are **not editable Premiere titles**; font substitution, layout and unsupported graphic styles may change the appearance, as the report notes. Pillow is required to rasterize Graphics (`py -3 -m pip install -r requirements.txt`). It starts with a bundled, neutral graph layout (see the MIT attribution in `premiere_seed.py`), not a project containing your media. An optional empty shell only supplies two build-version strings; it is **not** a guarantee that the graph matches your Premiere version. Diagnostics in the report are currently in Russian even in the English UI.
 
 The CLI uses the same direct writer:
 
@@ -74,12 +74,12 @@ py -3 fcproj_to_prproj.py project.fcproj output.prproj
 py -3 fcproj_to_prproj.py project.fcproj output.prproj --shell empty-premiere-shell.prproj
 ```
 
-This remains **experimental**. The embedded graph is a structural starting point, not a verified Premiere export for every version. The converter currently does not reverse-map effects, transitions, retiming, and several audio/track/sequence properties; omissions are reported. It resolves clip references by `project.items` key or an unambiguous item `id`. If a referenced item is truly absent from `project.items`, it cannot reconstruct that clip from its numeric ID alone and reports the clip name/ID. It rejects missing references, overlapping clips on one track and cyclic nesting rather than silently creating an inconsistent project; other unsupported properties are reported as omissions. Round-trip XML/reference tests **do not prove Premiere Pro opens or renders the output**. Keep original projects, read the report and check results in your Premiere version before relying on them.
+This remains **experimental**. The embedded graph is a structural starting point, not a verified Premiere export for every version. Apart from basic `graphic_text` rasterization, the converter currently does not reverse-map effects, transitions, retiming, and several audio/track/sequence properties; omissions are reported. It resolves clip references by `project.items` key or an unambiguous item `id`. If a referenced item is truly absent from `project.items`, it cannot reconstruct that clip from its numeric ID alone and reports the clip name/ID. It rejects missing references, overlapping clips on one track and cyclic nesting rather than silently creating an inconsistent project; other unsupported properties are reported as omissions. Round-trip XML/reference tests **do not prove Premiere Pro opens or renders the output**. Keep original projects, read the report and check results in your Premiere version before relying on them.
 
 ## Development checks
 
 ```powershell
-py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py premiere_seed.py reverse_project.py shortcut_converter.py update_converter.py
+py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py reverse_project.py shortcut_converter.py update_converter.py
 py -3 -m unittest discover -s tests -v
 ```
 
@@ -122,7 +122,7 @@ py -3 desktop_app.py
 
 1. Установите Python 3.10+ с Python Launcher (`py`).
 2. Запустите `Build_Windows_EXE.bat`.
-3. Скрипт установит PySide6/PyInstaller, соберёт `FilmCraftConverter.exe` и скопирует его рядом с исходниками.
+3. Скрипт установит PySide6, Pillow и PyInstaller, соберёт `FilmCraftConverter.exe` и скопирует его рядом с исходниками.
 4. Запустите EXE. Для уже собранного приложения Python и браузер не нужны.
 
 `Start_Converter.bat` предпочитает запуск исходников через Python, чтобы сначала проверить обновления. Если Python/PySide6 недоступен, запускается имеющийся EXE, но **он автоматически не обновляется**. Для первой сборки EXE нужен интернет для установки зависимостей. EXE нужно собирать на Windows; готового бинарника в репозитории нет.
@@ -133,7 +133,7 @@ py -3 desktop_app.py
 
 Версии сохраняются в `%LOCALAPPDATA%\FilmCraftConverter\source-updates\versions\<commit>`. Исходная папка, батник, EXE, пользовательские проекты и профили клавиш **не перезаписываются**. Если GitHub недоступен, исчерпан лимит API или обновление повреждено, запускается последняя сохранённая версия (либо локальные исходники). Чтобы запустить локальную версию без проверки сети, задайте `FILMCRAFT_SKIP_UPDATE=1`. Из-за лимита GitHub API без авторизации проверяются репозитории не более чем с 40 ветками; при превышении лимита используется резервная версия.
 
-Это обновление **только исходников**: PySide6 нужно установить самостоятельно (`py -3 -m pip install -r requirements.txt`). Готовый EXE не скачивается и не пересобирается автоматически; для него повторно запустите `Build_Windows_EXE.bat` или публикуйте отдельный бинарный релиз.
+Это обновление **только исходников**: зависимости (PySide6 и Pillow для экспорта Graphic) автоматически не устанавливаются. После обновления исходников при необходимости выполните `py -3 -m pip install -r requirements.txt`. Готовый EXE не скачивается и не пересобирается автоматически; для него повторно запустите `Build_Windows_EXE.bat` или публикуйте отдельный бинарный релиз.
 
 ## Конвертация проектов: общая очередь
 
@@ -152,7 +152,7 @@ py -3 desktop_app.py
 
 ## Ограничения FilmCraft → Premiere (экспериментально)
 
-Writer строит нативный граф ссылок **медиа → master clip → последовательность → дорожка → клип** по данным FC и назначает новые идентификаторы объектов Premiere. Поддержаны несколько последовательностей и дорожек, повторное использование медиа, базовые тайминги видео/аудио и вложенные последовательности с однозначным именем. Медиа **не копируются**, а указываются путями из FC. Универсальный внутренний каркас обезличен (источник под MIT указан в `premiere_seed.py`); проекта Premiere с вашими медиа в нём нет. Необязательная пустая оболочка даёт лишь две строки версии сборки и **не гарантирует** совместимость с вашей версией Premiere. Диагностика writer в отчёте пока на русском языке.
+Writer строит нативный граф ссылок **медиа → master clip → последовательность → дорожка → клип** по данным FC и назначает новые идентификаторы объектов Premiere. Поддержаны несколько последовательностей и дорожек, повторное использование медиа, базовые тайминги видео/аудио и вложенные последовательности с однозначным именем. Исходные медиа **не копируются**, а указываются путями из FC. Для каждого используемого клипа `Graphic` создаётся отдельный PNG с приблизительно отрисованным `graphic_text` (нужен Pillow: `py -3 -m pip install -r requirements.txt`). PNG лежит рядом с `.prproj`: переносите его вместе с проектом. Это **не редактируемый титр Premiere**; при замене шрифта и неподдерживаемых стилях вид может отличаться, как указано в отчёте. Универсальный внутренний каркас обезличен (источник под MIT указан в `premiere_seed.py`); проекта Premiere с вашими медиа в нём нет. Необязательная пустая оболочка даёт лишь две строки версии сборки и **не гарантирует** совместимость с вашей версией Premiere. Диагностика writer в отчёте пока на русском языке.
 
 CLI использует тот же прямой writer:
 
@@ -162,12 +162,12 @@ py -3 fcproj_to_prproj.py project.fcproj output.prproj
 py -3 fcproj_to_prproj.py project.fcproj output.prproj --shell empty-premiere-shell.prproj
 ```
 
-Это всё ещё **экспериментальный**, а не универсальный обратный конвертер. Эффекты, переходы, изменение скорости и ряд свойств аудио/дорожек/последовательностей пока не переносятся — пропуски отмечаются в отчёте. Ссылки на клипы ищутся по ключу `project.items` или по однозначному полю `id`. Если элемент действительно отсутствует в `project.items`, восстановить исходник по одному числовому ID нельзя: ошибка укажет имя клипа и ID. Отсутствующие ссылки, перекрывающиеся клипы на одной дорожке и циклические вложения отклоняются с ошибкой. Проверка XML и ссылок в тестах **не доказывает**, что Premiere Pro откроет или воспроизведёт файл. Сохраняйте оригиналы, читайте отчёт и проверяйте результат в своей версии Premiere.
+Это всё ещё **экспериментальный**, а не универсальный обратный конвертер. Помимо базовой растеризации `graphic_text`, эффекты, переходы, изменение скорости и ряд свойств аудио/дорожек/последовательностей пока не переносятся — пропуски отмечаются в отчёте. Ссылки на клипы ищутся по ключу `project.items` или по однозначному полю `id`. Если элемент действительно отсутствует в `project.items`, восстановить исходник по одному числовому ID нельзя: ошибка укажет имя клипа и ID. Отсутствующие ссылки, перекрывающиеся клипы на одной дорожке и циклические вложения отклоняются с ошибкой. Проверка XML и ссылок в тестах **не доказывает**, что Premiere Pro откроет или воспроизведёт файл. Сохраняйте оригиналы, читайте отчёт и проверяйте результат в своей версии Premiere.
 
 ## Проверки разработки
 
 ```powershell
-py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py premiere_seed.py reverse_project.py shortcut_converter.py update_converter.py
+py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py reverse_project.py shortcut_converter.py update_converter.py
 py -3 -m unittest discover -s tests -v
 ```
 

@@ -19,7 +19,9 @@ REPORT_TEXT = {
                  'создаются из FilmCraft без заполненного Premiere-эталона. '
                  'Эффекты, переходы и особые параметры могут не переноситься. '
                  'Открытие результата в Premiere Pro необходимо проверить.'),
-        'media': 'Медиафайлы не копируются; при необходимости перепривяжите их в Premiere Pro.',
+        'media': ('Исходные медиафайлы не копируются. Для Graphic создаются PNG рядом '
+                  'с результатом — сохраните их вместе с проектом при переносе. '
+                  'При необходимости перепривяжите медиа в Premiere Pro.'),
     },
     'en': {
         'title': 'FilmCraft → Premiere conversion report',
@@ -30,7 +32,9 @@ REPORT_TEXT = {
                  'from FilmCraft without a populated Premiere reference. Effects, '
                  'transitions and special properties may not transfer. Verify the '
                  'result by opening it in Premiere Pro. Diagnostics below may be in Russian.'),
-        'media': 'Media files are not copied; relink them in Premiere Pro if needed.',
+        'media': ('Original media files are not copied. Generated Graphic PNGs are saved '
+                  'next to the project; keep them together when moving it. Relink media '
+                  'in Premiere Pro if needed.'),
     },
 }
 
