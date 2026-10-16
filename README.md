@@ -29,7 +29,15 @@ py -3 desktop_app.py
 3. The script installs PySide6/PyInstaller, builds `FilmCraftConverter.exe`, and copies it beside the source files.
 4. Launch the EXE. Python and a browser are not required to run the built app.
 
-`Start_Converter.bat` launches an existing EXE or runs the Python app if its dependencies are installed. The first build needs an internet connection to install dependencies. A Windows EXE must be built on Windows; no prebuilt binary is included in this repository.
+`Start_Converter.bat` prefers a Python source launch so it can check for source updates first. If Python/PySide6 is unavailable, it falls back to an existing EXE, which **is not automatically updated**. The first EXE build needs an internet connection to install dependencies. A Windows EXE must be built on Windows; no prebuilt binary is included in this repository.
+
+### Source auto-updates on launch
+
+With Python 3.10+ installed, the batch file uses `update_converter.py` to inspect **all branches of this repository** and selects the branch whose HEAD has the most recent *committer date* (not necessarily `main`). It downloads that commit's source ZIP from GitHub and runs the downloaded Python app. It checks on each launch; no Git or GitHub account is required. Only download code from this repository if you trust everyone who can push to its branches.
+
+Versions are cached under `%LOCALAPPDATA%\FilmCraftConverter\source-updates\versions\<commit>`. Your checkout, launcher, EXE, user projects, and shortcut profiles are **not overwritten**. If GitHub is offline/rate-limited or an update fails validation, the last cached version is launched (or the local source if none is cached). Set `FILMCRAFT_SKIP_UPDATE=1` before launching to run the local source without a network check. The check is limited to 40 branches because unauthenticated GitHub API requests are rate-limited; when this limit is exceeded, it falls back safely.
+
+This is a **source-only** updater: installing PySide6 is still your responsibility (`py -3 -m pip install -r requirements.txt`). The EXE is neither downloaded nor rebuilt automatically; to update a standalone EXE, rebuild it with `Build_Windows_EXE.bat` or publish a release binary separately.
 
 ## Project conversion: shared queue
 
@@ -70,7 +78,7 @@ This is **not a general reverse converter**. Creating new Premiere media/master-
 ## Development checks
 
 ```powershell
-py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py reverse_project.py shortcut_converter.py
+py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py reverse_project.py shortcut_converter.py update_converter.py
 py -3 -m unittest discover -s tests -v
 ```
 
@@ -116,7 +124,15 @@ py -3 desktop_app.py
 3. Скрипт установит PySide6/PyInstaller, соберёт `FilmCraftConverter.exe` и скопирует его рядом с исходниками.
 4. Запустите EXE. Для уже собранного приложения Python и браузер не нужны.
 
-`Start_Converter.bat` запускает существующий EXE или исходный код, если зависимости установлены. Для первой сборки нужен интернет, чтобы установить зависимости. EXE нужно собирать на Windows; готового бинарника в репозитории нет.
+`Start_Converter.bat` предпочитает запуск исходников через Python, чтобы сначала проверить обновления. Если Python/PySide6 недоступен, запускается имеющийся EXE, но **он автоматически не обновляется**. Для первой сборки EXE нужен интернет для установки зависимостей. EXE нужно собирать на Windows; готового бинарника в репозитории нет.
+
+### Автообновление исходников при запуске
+
+При наличии Python 3.10+ батник вызывает `update_converter.py`: проверяет **все ветки этого репозитория** и выбирает ту, у которой самый поздний *коммит по дате коммиттера* (это не обязательно `main`). Затем скачивает ZIP исходников именно этого коммита с GitHub и запускает обновлённый код. Проверка проводится при каждом запуске; Git и аккаунт GitHub не нужны. Используйте такой режим, только если доверяете всем, кто может публиковать ветки в репозитории.
+
+Версии сохраняются в `%LOCALAPPDATA%\FilmCraftConverter\source-updates\versions\<commit>`. Исходная папка, батник, EXE, пользовательские проекты и профили клавиш **не перезаписываются**. Если GitHub недоступен, исчерпан лимит API или обновление повреждено, запускается последняя сохранённая версия (либо локальные исходники). Чтобы запустить локальную версию без проверки сети, задайте `FILMCRAFT_SKIP_UPDATE=1`. Из-за лимита GitHub API без авторизации проверяются репозитории не более чем с 40 ветками; при превышении лимита используется резервная версия.
+
+Это обновление **только исходников**: PySide6 нужно установить самостоятельно (`py -3 -m pip install -r requirements.txt`). Готовый EXE не скачивается и не пересобирается автоматически; для него повторно запустите `Build_Windows_EXE.bat` или публикуйте отдельный бинарный релиз.
 
 ## Конвертация проектов: общая очередь
 
@@ -142,7 +158,7 @@ CLI использует тот же экспериментальный writer; 
 ## Проверки разработки
 
 ```powershell
-py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py reverse_project.py shortcut_converter.py
+py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py reverse_project.py shortcut_converter.py update_converter.py
 py -3 -m unittest discover -s tests -v
 ```
 
