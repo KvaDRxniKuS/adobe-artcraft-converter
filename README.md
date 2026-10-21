@@ -10,6 +10,7 @@
 - Premiere Pro `.prproj` → FilmCraft `.fcproj` conversion, including supported sequences, tracks, clips, transitions, and selected effects.
 - Experimental direct FilmCraft `.fcproj` → Premiere `.prproj` conversion in the same queue, creating media, sequences, tracks and clips from FC references; an empty Premiere shell is optional.
 - Premiere KYS XML ↔ FilmCraft keyboard-shortcut JSON conversion from the **Keyboard shortcuts** dialog or CLI.
+- **Experimental:** recognize AE Pixel Sorter 2 `.aex` and export an independently implemented, working EffectCraft WebAssembly pixel-sorting effect; **not** a binary translation or a promise of pixel-for-pixel AE parity.
 - Conversion reports list unsupported or unmapped items instead of guessing at command/effect equivalence.
 - Original project media is referenced, not copied; moved media must be relinked. A single static `graphic_text` layer per Graphic clip is encoded as an editable Premiere Type-tool title. Unsupported or more complex Graphics fall back to PNGs beside the project.
 
@@ -62,6 +63,21 @@ py -3 shortcut_converter.py FilmCraft.json Premiere.kys `
 
 The bundled template files are **sanitized mapping catalogs**: they contain no user's assigned key combinations. For Premiere output, commands not represented in the FilmCraft mapping may remain unassigned; for FilmCraft output, unmapped commands are reported. If multiple FilmCraft commands map to one Premiere command, only the first is written and the conflict is reported. The crosswalk is intentionally conservative and does not fuzzy-match command names. If you use a personal shortcut profile as an input, keep it private and do not commit it.
 
+## After Effects `.aex` → EffectCraft `.wasm` (Pixel Sorter only)
+
+**Ready-to-load effect:** [PixelSorter_EffectCraft.wasm](effectcraft_plugins/PixelSorter_EffectCraft.wasm) (EffectCraft desktop/CLI plug-in API v1, `org.artcraft_converter.pixel_sorter`). In EffectCraft choose **Effect → Load Effect Plug-in…**, select this `.wasm`, then look under **Stylize**. The EffectCraft web app does not load WASM plug-ins. You can also put the file in the `Plug-ins` folder next to EffectCraft settings for startup loading (see [EffectCraft's plug-in docs](https://github.com/storytold/effectcraft/blob/main/docs/plugins.md)).
+
+The desktop app has an **EffectCraft: .aex → .wasm** button independent of the *shared project queue*. Choose your **AE Pixel Sorter 2** `.aex` (or the uploaded `.aex.txt`) and a **new** `.wasm` destination. The CLI does the same without PySide6:
+
+```powershell
+py -3 aex_to_effectcraft.py "C:\path\AEPixelSorter2.aex" "C:\path\PixelSorter_effectcraft.wasm" --language en
+# Or on Linux/macOS: python3 aex_to_effectcraft.py INPUT.aex OUTPUT.wasm
+```
+
+The tool reads at most 64 MiB of the input, statically checks the x64 PE DLL and its exports/identifying control labels, and writes the self-contained `.wasm` plus `*_conversion_report.md` **without overwriting existing files**. No installer, After Effects installation, npm or network access is needed at conversion/use time. The `.aex` is never run, copied into the output, or decompiled into it. Unsupported `.aex` files are **rejected** rather than falsely converted; only this identified family has an independently written port. We do not transfer AE project presets, source-layer inputs, Resolution/Zoom, a license, or the original proprietary algorithm. The 18 controls (trigger/sort metrics, angle, threshold, highlights/shadows, block size, length, offset, blur, feather, seed, diagnostic output and alpha) have **our own semantics** and may differ from the Adobe plug-in. For actual visual matching, provide paired frames before/after in AE along with settings. EffectCraft itself has **not** been run in this sandbox; the WASM ABI and real rendering have been exercised with Node.js, but in-app loading and AE render parity still need a user check.
+
+The independent AssemblyScript source and manifest are in `effectcraft_plugins/`; the embedded WASM is `effectcraft_pixel_sorter.py`, so source-only updates and locally built Windows EXEs can convert without bundling a toolchain. To **rebuild** the artifact (not required to run it), run `npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20`, then `python3 tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc` (on Windows, use `asc.cmd`). Rebuild the distributable `.wasm` by converting the `.aex` again into a **new** path. Check with `node tests/effectcraft_wasm_smoke.cjs` and the Python tests; the JavaScript smoke test is optional for end users.
+
 ## FilmCraft → Premiere limitations (experimental)
 
 The writer constructs a native-style **media → master clip → sequence → track → clip** reference graph from FC items, assigning fresh Premiere object IDs. It handles multiple sequences, tracks, reused media, basic video/audio timings and sequences nested by unambiguous name. Original media are **linked by path, never copied**. For a Graphic clip with **one static, supported `graphic_text` layer**, it embeds the Unicode text, font name, size, fill/stroke, alignment and basic transforms in a Premiere Type-tool `AE.ADBE Text` component with a binary Source Text payload. This makes the title *intended to be editable*, instead of rendering it to an image. Fonts must be installed on the Premiere computer; their metrics and layout may differ. Animated or multi-layer titles and unsupported styles fall back to a separate PNG beside the `.prproj` (requires Pillow); keep any generated PNGs with the project. A missing flatbuffers library also triggers PNG fallback; install all dependencies with `py -3 -m pip install -r requirements.txt`. Both small, neutral graph layouts originate in public MIT fixtures (attribution and licenses in `premiere_seed.py` and `premiere_text_seed.py`), not a project containing your media. An optional empty shell only supplies two build-version strings; it is **not** a guarantee that the graph matches your Premiere version. **The native title has passed structural/payload and timeline round-trip tests, not an Adobe Premiere open, edit or render test.** Diagnostics in the report are currently in Russian even in the English UI.
@@ -81,7 +97,7 @@ This remains **experimental**. The embedded graph is a structural starting point
 ## Development checks
 
 ```powershell
-py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py premiere_text.py premiere_text_seed.py reverse_project.py shortcut_converter.py update_converter.py
+py -3 -m py_compile desktop_app.py aex_to_effectcraft.py effectcraft_pixel_sorter.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py premiere_text.py premiere_text_seed.py reverse_project.py shortcut_converter.py update_converter.py
 py -3 -m unittest discover -s tests -v
 ```
 
@@ -89,7 +105,7 @@ The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premi
 
 ## Repository hygiene and privacy
 
-- User projects, test outputs, shortcut profiles, and conversion reports belong in `uploads/` or another local folder; `/uploads/` and common generated project/report files are excluded by `.gitignore`.
+- User projects, test outputs, shortcut profiles, generated `.wasm` files and conversion reports belong in `uploads/` or another local folder and are ignored by Git. The only exception is the 10 KB [ready-to-load WASM sample](effectcraft_plugins/PixelSorter_EffectCraft.wasm). The original `.aex` and installer must not be added to the repository.
 - The committed shortcut templates are blank/sanitized catalogs. Do not replace them with personal profiles before publishing. The embedded Premiere graph layouts are adapted from MIT-licensed public fixtures; sources, changes and full license notices are in `premiere_seed.py` and `premiere_text_seed.py`.
 - No credentials or user project/media paths are intended to be part of the source release. Run a final repository scan before pushing, especially after adding test fixtures.
 - No `LICENSE` file is included. Choose a license before describing the project as open source; without one, normal copyright restrictions apply.
@@ -108,6 +124,7 @@ The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premi
 - Конвертация `.prproj` → `.fcproj` с поддержкой части последовательностей, дорожек, клипов, переходов и эффектов.
 - Экспериментальная прямая конвертация FilmCraft `.fcproj` → Premiere `.prproj` в той же очереди: медиа, последовательности, дорожки и клипы создаются из ссылок FC; пустая оболочка Premiere необязательна.
 - Конвертация Premiere KYS XML ↔ FilmCraft JSON для горячих клавиш через окно приложения или CLI.
+- **Экспериментально:** распознавание AE Pixel Sorter 2 `.aex` и создание самостоятельного работающего WASM-эффекта для EffectCraft; **не** перевод закрытого бинарного кода или гарантия совпадения с рендером AE.
 - Отчёты перечисляют неподдерживаемые и несопоставленные элементы; конвертер не угадывает похожие команды.
 - Исходные медиа не копируются. Один простой статичный слой `graphic_text` на клипе Graphic кодируется как редактируемый титр Premiere; сложные случаи сохраняются в PNG. Перемещённые файлы нужно перепривязать в целевой программе.
 
@@ -152,6 +169,21 @@ py -3 desktop_app.py
 
 Включённые шаблоны — **очищенные каталоги соответствий** без пользовательских назначений. В выходном KYS команды, не покрытые таблицей FilmCraft, могут остаться без клавиш; неподдерживаемые команды указываются в отчёте. Если несколько FilmCraft-команд сопоставились одной команде Premiere, переносится первая, а конфликт попадает в отчёт. Сопоставление намеренно консервативное. Не добавляйте личные профили горячих клавиш в публичный репозиторий.
 
+## After Effects `.aex` → EffectCraft `.wasm` (пока только Pixel Sorter)
+
+**Готовый эффект:** [PixelSorter_EffectCraft.wasm](effectcraft_plugins/PixelSorter_EffectCraft.wasm) (Plug-in API v1, ID `org.artcraft_converter.pixel_sorter`). В программе EffectCraft откройте **Effect → Load Effect Plug-in…**, выберите `.wasm` и найдите эффект в категории **Stylize**. Также можно поместить файл в папку `Plug-ins` рядом с настройками EffectCraft для загрузки при запуске. Веб-версия EffectCraft WASM-плагины не поддерживает.
+
+В приложении кнопка **EffectCraft: .aex → .wasm** открывает инструмент для **плагинов**, отдельно от общей очереди *проектов*. Выберите исходный **AE Pixel Sorter 2** `.aex` (допускается `.aex.txt` из загрузки) и **новый** путь `.wasm`. То же через CLI без PySide6:
+
+```powershell
+py -3 aex_to_effectcraft.py "C:\path\AEPixelSorter2.aex" "C:\path\PixelSorter_effectcraft.wasm"
+# Linux/macOS: python3 aex_to_effectcraft.py INPUT.aex OUTPUT.wasm
+```
+
+Программа статически проверяет 64-битный Windows PE DLL, экспорты и характерные строки (не более 64 МБ), затем создаёт автономный `.wasm` и соседний `*_conversion_report.md`; существующие файлы не перезаписываются. Для конвертации и запуска не нужны установщик, After Effects, npm или сеть. `.aex` **не исполняется** и **не копируется** в результат, закрытый код не переносится. Неизвестные `.aex` отклоняются: универсального перевода бинарных плагинов Adobe в EffectCraft **нет**. Исходники/пресеты из AE-проекта, внешние Source-слои, Resolution/Zoom и лицензия не переносятся. У 18 параметров (метрики, угол, порог, Highlights/Shadows, группы линий, длина, смещение, размытие, растушёвка, seed, диагностика, прозрачность) **самостоятельная семантика**. Точное совпадение с коммерческим Pixel Sorter не подтверждено: для сравнения нужны парные кадры «до/после» и значения параметров AE. **Сам EffectCraft здесь запустить не удалось**; ABI и обработка кадров проверены в WebAssembly/Node.js, но открытие в приложении и совпадение с AE пользователю ещё нужно проверить.
+
+Независимые исходники AssemblyScript и манифест находятся в `effectcraft_plugins/`, готовый WASM для работы Python/EXE встроен в `effectcraft_pixel_sorter.py`. Обновление исходников загрузит его автоматически; наличие npm при использовании не требуется. Для **пересборки исходника** (не нужно для работы) установите AssemblyScript 0.28.20: `npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20`, затем `python3 tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc` (в Windows: `asc.cmd`). Чтобы обновить распространяемый `.wasm`, ещё раз конвертируйте `.aex` в новый путь. Проверка: `node tests/effectcraft_wasm_smoke.cjs` и Python-тесты; Node.js нужен только разработчику.
+
 ## Ограничения FilmCraft → Premiere (экспериментально)
 
 Writer строит нативный граф ссылок **медиа → master clip → последовательность → дорожка → клип** по данным FC и назначает новые идентификаторы объектов Premiere. Поддержаны несколько последовательностей и дорожек, повторное использование медиа, базовые тайминги видео/аудио и вложенные последовательности с однозначным именем. Исходные медиа **не копируются**, а указываются путями из FC. Для клипа Graphic с **одним простым статичным слоем `graphic_text`** в компонент `AE.ADBE Text` записываются текст Unicode, имя шрифта, размер, заливка/обводка, выравнивание и базовые параметры положения: титр *предполагается редактируемым* в Premiere, а не отрисованным в картинку. Шрифт должен быть установлен на компьютере с Premiere; метрики и вёрстка могут отличаться. При нескольких слоях, анимации или неподдерживаемом стиле остаётся отдельный PNG рядом с `.prproj` (нужен Pillow); переносите PNG вместе с проектом. Если не установлен flatbuffers, также используется PNG. Установите зависимости: `py -3 -m pip install -r requirements.txt`. Оба небольших обезличенных каркаса адаптированы из публичных MIT-образцов (атрибуция в `premiere_seed.py` и `premiere_text_seed.py`); проекта Premiere с вашими медиа в них нет. Необязательная пустая оболочка даёт лишь две строки версии сборки и **не гарантирует** совместимость с вашей версией Premiere. **Нативный титр прошёл структурные тесты, проверку бинарных данных и таймлайна, но не проверку открытия, редактирования или рендера в Adobe Premiere.** Диагностика writer в отчёте пока на русском языке.
@@ -171,7 +203,7 @@ py -3 fcproj_to_prproj.py project.fcproj output.prproj --graphics png
 ## Проверки разработки
 
 ```powershell
-py -3 -m py_compile desktop_app.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py premiere_text.py premiere_text_seed.py reverse_project.py shortcut_converter.py update_converter.py
+py -3 -m py_compile desktop_app.py aex_to_effectcraft.py effectcraft_pixel_sorter.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py premiere_text.py premiere_text_seed.py reverse_project.py shortcut_converter.py update_converter.py
 py -3 -m unittest discover -s tests -v
 ```
 
@@ -179,7 +211,7 @@ GUI также нужно проверить на Windows с реальными 
 
 ## Чистота репозитория и приватность
 
-- Пользовательские проекты, тестовые результаты, профили горячих клавиш и отчёты храните локально в `uploads/` или отдельной папке: `/uploads/` и типовые результаты исключены через `.gitignore`.
+- Пользовательские проекты, результаты, профили горячих клавиш, сгенерированные `.wasm` и отчёты храните локально в `uploads/` или другой папке: они исключены из Git. Исключение — один готовый [WASM-эффект](effectcraft_plugins/PixelSorter_EffectCraft.wasm) на 10 КБ. Оригинальные `.aex` и установщик не добавляйте в репозиторий.
 - Шаблоны горячих клавиш очищены. Обезличенные каркасы Premiere адаптированы из публичных MIT-fixtures; источники, изменения и тексты лицензий указаны в `premiere_seed.py` и `premiere_text_seed.py`. Перед публикацией проверьте `git status` и добавляемые файлы.
 - В исходниках не предполагаются токены, пользовательские пути или медиафайлы; перед push всё равно выполните финальную проверку.
 - Файла `LICENSE` нет. Выберите лицензию до заявления, что проект распространяется как open source; без лицензии действуют обычные ограничения авторского права.

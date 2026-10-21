@@ -4,6 +4,9 @@
 *.prproj
 *_conversion_report.md
 *_shortcuts_report.md
+# Generated effect binaries are local except the small, ready-to-load sample.
+*.wasm
+!/effectcraft_plugins/PixelSorter_EffectCraft.wasm
 
 # Python and Windows build artifacts
 __pycache__/

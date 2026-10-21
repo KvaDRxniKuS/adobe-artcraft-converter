@@ -1,0 +1,29 @@
+{
+  "api": 1,
+  "id": "org.artcraft_converter.pixel_sorter",
+  "name": "Pixel Sorter (independent port)",
+  "category": "Stylize",
+  "version": "0.1.0",
+  "author": "ArtCraft Converter contributors",
+  "description": "Independent pixel-sorting effect for EffectCraft. Not the original AE Pixel Sorter 2 algorithm or a binary translation.",
+  "params": [
+    {"id": "affect", "name": "Affect", "type": "popup", "options": ["Highlights", "Shadows"], "default": 0},
+    {"id": "trigger", "name": "Trigger", "type": "popup", "options": ["Red Channel", "Green Channel", "Blue Channel", "Alpha Channel", "Minimum", "Maximum", "Luminosity", "Saturation", "Hue"], "default": 6},
+    {"id": "sort_by", "name": "Sort by", "type": "popup", "options": ["Red Channel", "Green Channel", "Blue Channel", "Alpha Channel", "Minimum", "Maximum", "XOR", "Luminosity", "Saturation", "Hue"], "default": 7},
+    {"id": "angle", "name": "Angle", "type": "angle", "default": 0},
+    {"id": "threshold", "name": "Threshold (%)", "type": "slider", "default": 40, "min": 0, "max": 100, "decimals": 1},
+    {"id": "invert", "name": "Invert Sorting", "type": "checkbox", "default": false},
+    {"id": "block_size", "name": "Block Size (lines)", "type": "slider", "default": 1, "min": 1, "max": 64, "decimals": 0},
+    {"id": "length", "name": "Length Limit (px; 0 = off)", "type": "slider", "default": 0, "min": 0, "max": 8192, "decimals": 0},
+    {"id": "offset", "name": "Offset (px)", "type": "slider", "default": 0, "min": -2048, "max": 2048, "decimals": 0},
+    {"id": "offset_random", "name": "Offset Random (px)", "type": "slider", "default": 0, "min": 0, "max": 512, "decimals": 0},
+    {"id": "cycle", "name": "Cycle (per second)", "type": "slider", "default": 0, "min": 0, "max": 30, "decimals": 1},
+    {"id": "seed", "name": "Random seed", "type": "slider", "default": 0, "min": 0, "max": 999999, "decimals": 0},
+    {"id": "feather_start", "name": "Feather Start (px)", "type": "slider", "default": 0, "min": 0, "max": 128, "decimals": 0},
+    {"id": "feather_end", "name": "Feather End (px)", "type": "slider", "default": 0, "min": 0, "max": 128, "decimals": 0},
+    {"id": "smooth", "name": "Smooth Trigger (px)", "type": "slider", "default": 0, "min": 0, "max": 8, "decimals": 0},
+    {"id": "blur", "name": "Blur Sorted Pixels (px)", "type": "slider", "default": 0, "min": 0, "max": 8, "decimals": 0},
+    {"id": "output", "name": "Output", "type": "popup", "options": ["Sorted Pixels", "Gradient", "Matte", "Map"], "default": 0},
+    {"id": "preserve_alpha", "name": "Preserve alpha channel", "type": "checkbox", "default": true}
+  ]
+}

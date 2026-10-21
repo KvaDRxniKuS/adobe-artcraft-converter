@@ -156,6 +156,12 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue((output / 'graphic_raster.py').is_file())
         self.assertTrue((output / 'premiere_text.py').is_file())
         self.assertTrue((output / 'premiere_text_seed.py').is_file())
+        # Source-only updates must carry the offline WASM asset inside a root .py,
+        # without shipping the AssemblyScript toolchain or any .aex inputs.
+        self.assertEqual((output / 'effectcraft_pixel_sorter.py').read_bytes(),
+                         (repository / 'effectcraft_pixel_sorter.py').read_bytes())
+        self.assertTrue((output / 'aex_to_effectcraft.py').is_file())
+        self.assertFalse((output / 'effectcraft_plugins').exists())
         self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))
         self.assertIn('flatbuffers', (output / 'requirements.txt').read_text(encoding='utf-8'))
 

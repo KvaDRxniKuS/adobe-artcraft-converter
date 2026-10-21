@@ -1,0 +1,336 @@
+// Independent pixel-sorting effect for EffectCraft Plug-in API v1.
+// No Adobe code or binary is embedded or executed. The controls are informed by
+// strings found during static inspection of the user's AE Pixel Sorter 2 .aex.
+// This is NOT a bit-for-bit reimplementation of the proprietary plug-in.
+// Build with tools/build_pixel_sorter.py (AssemblyScript 0.28.20, --runtime stub).
+
+const MANIFEST_PTR: usize = memory.data<u8>([__MANIFEST_BYTES__]);
+const MANIFEST_LEN: i32 = __MANIFEST_LEN__;
+const HOST_BUFFER: i32 = 65536; // Manifest is checked to fit below this address.
+const MAX_PIXELS: i32 = 12000000;
+const MAX_WASM_BYTES: i32 = 1 << 30;
+
+export function ec_api_version(): i32 { return 1; }
+export function ec_manifest_ptr(): i32 { return <i32>MANIFEST_PTR; }
+export function ec_manifest_len(): i32 { return MANIFEST_LEN; }
+
+// A single reusable, aligned host buffer. Nothing grows between ec_alloc and
+// ec_render except linear memory; Wasm grow keeps all pointers stable.
+export function ec_alloc(bytes: i32): i32 {
+  if (bytes <= 0 || bytes > MAX_PIXELS * 16 + 65536) return 0;
+  let needed: i32 = HOST_BUFFER + bytes;
+  let pages: i32 = (needed + 65535) >> 16;
+  if (pages > memory.size() && memory.grow(pages - memory.size()) < 0) return 0;
+  return HOST_BUFFER;
+}
+
+function growTo(end: i32): bool {
+  if (end < 0 || end >= MAX_WASM_BYTES) return false;
+  let pages: i32 = (end + 65535) >> 16;
+  return pages <= memory.size() || memory.grow(pages - memory.size()) >= 0;
+}
+
+function clamp(value: f64, lo: f64, hi: f64, fallback: f64): f64 {
+  if (value != value || value < -1e12 || value > 1e12) return fallback;
+  return Math.max(lo, Math.min(hi, value));
+}
+function param(params: i32, idx: i32, lo: f64, hi: f64, fallback: f64): f64 {
+  return clamp(load<f64>(params + (idx << 3)), lo, hi, fallback);
+}
+function bound(v: f32): f32 { return max<f32>(0.0, min<f32>(1.0, v)); }
+
+// Read *straight* RGB for measuring the key: EffectCraft pixels are premultiplied.
+function metric(pointer: i32, key: i32, sorting: bool): f32 {
+  let a: f32 = load<f32>(pointer + 12);
+  if (!(a > 0.000001)) return 0.0;
+  let r: f32 = load<f32>(pointer) / a;
+  let g: f32 = load<f32>(pointer + 4) / a;
+  let b: f32 = load<f32>(pointer + 8) / a;
+  if (sorting && key == 6) {
+    let rr: u32 = <u32>Math.round(bound(r) * 255.0);
+    let gg: u32 = <u32>Math.round(bound(g) * 255.0);
+    let bb: u32 = <u32>Math.round(bound(b) * 255.0);
+    return <f32>(rr ^ gg ^ bb) / 255.0;
+  }
+  if (sorting && key > 6) key -= 1;
+  if (key == 0) return r;
+  if (key == 1) return g;
+  if (key == 2) return b;
+  if (key == 3) return a;
+  let low: f32 = min<f32>(r, min<f32>(g, b));
+  let high: f32 = max<f32>(r, max<f32>(g, b));
+  if (key == 4) return low;
+  if (key == 5) return high;
+  if (key == 6) return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  let delta: f32 = high - low;
+  if (key == 7) return high <= 0.000001 ? 0.0 : delta / high;
+  if (delta < 0.000001) return 0.0;
+  let hue: f32;
+  if (high == r) hue = (g - b) / delta;
+  else if (high == g) hue = 2.0 + (b - r) / delta;
+  else hue = 4.0 + (r - g) / delta;
+  hue /= 6.0;
+  if (hue < 0.0) hue += 1.0;
+  return hue;
+}
+
+function lineBin(x: i32, y: i32, xMajor: bool, slope: f64,
+                 shift: f64, blockSize: i32): i32 {
+  let v: f64 = xMajor ? <f64>y - <f64>x * slope : <f64>x - <f64>y * slope;
+  return <i32>Math.floor(v + shift + 0.5) / blockSize;
+}
+function keyGreater(a: i32, b: i32, keys: i32, inverse: bool): bool {
+  let ka: f32 = load<f32>(keys + (a << 2));
+  let kb: f32 = load<f32>(keys + (b << 2));
+  if (ka == kb) return a > b; // Fixed tie-breaker even with equal colours.
+  return inverse ? ka < kb : ka > kb;
+}
+function sift(order: i32, keys: i32, root0: i32, end: i32, inverse: bool): void {
+  let root: i32 = root0;
+  while ((root << 1) + 1 <= end) {
+    let child: i32 = (root << 1) + 1;
+    if (child < end && keyGreater(load<i32>(order + ((child + 1) << 2)),
+                                   load<i32>(order + (child << 2)), keys, inverse)) child++;
+    if (!keyGreater(load<i32>(order + (child << 2)),
+                    load<i32>(order + (root << 2)), keys, inverse)) break;
+    let tmp: i32 = load<i32>(order + (root << 2));
+    store<i32>(order + (root << 2), load<i32>(order + (child << 2)));
+    store<i32>(order + (child << 2), tmp);
+    root = child;
+  }
+}
+function heapSort(order: i32, keys: i32, n: i32, inverse: bool): void {
+  for (let i: i32 = (n >> 1) - 1; i >= 0; --i) sift(order, keys, i, n - 1, inverse);
+  for (let i: i32 = n - 1; i > 0; --i) {
+    let last: i32 = load<i32>(order + (i << 2));
+    store<i32>(order + (i << 2), load<i32>(order));
+    store<i32>(order, last);
+    sift(order, keys, 0, i - 1, inverse);
+  }
+}
+function randomShift(bin: i32, start: i32, seed: i32, time: f64,
+                     cycle: f64, amount: i32): i32 {
+  if (amount <= 0) return 0;
+  let tick: i32 = cycle > 0.0 ? <i32>Math.floor(clamp(time * cycle, -1000000, 1000000, 0)) : 0;
+  let h: u32 = <u32>seed ^ (<u32>bin * 0x9e3779b1) ^ (<u32>start * 0x85ebca77) ^ <u32>tick;
+  h ^= h >>> 16;
+  h *= 0x7feb352d;
+  h ^= h >>> 15;
+  h *= 0x846ca68b;
+  h ^= h >>> 16;
+  return <i32>(h % <u32>(amount * 2 + 1)) - amount;
+}
+function smoothMetric(values: i32, at: i32, length: i32, radius: i32): f32 {
+  if (radius == 0) return load<f32>(values + (at << 2));
+  let lo: i32 = max<i32>(0, at - radius);
+  let hi: i32 = min<i32>(length - 1, at + radius);
+  let sum: f32 = 0;
+  for (let i: i32 = lo; i <= hi; ++i) sum += load<f32>(values + (i << 2));
+  return sum / <f32>(hi - lo + 1);
+}
+function inRange(values: i32, at: i32, length: i32, radius: i32,
+                 threshold: f32, highlights: bool): bool {
+  let v: f32 = bound(smoothMetric(values, at, length, radius));
+  return highlights ? v >= threshold : v <= threshold;
+}
+
+function sortSegment(pixels: i32, indices: i32, from: i32, length: i32,
+                     original: i32, order: i32, keys: i32, keyMode: i32,
+                     inverse: bool, preserve: bool, offset: i32, jitter: i32,
+                     seed: i32, line: i32, time: f64, cycle: f64,
+                     featherStart: i32, featherEnd: i32, blurRadius: i32): void {
+  if (length < 2) return;
+  for (let i: i32 = 0; i < length; ++i) {
+    let addr: i32 = pixels + (load<i32>(indices + ((from + i) << 2)) << 4);
+    memory.copy(original + (i << 4), addr, 16);
+    store<i32>(order + (i << 2), i);
+    store<f32>(keys + (i << 2), metric(original + (i << 4), keyMode, true));
+  }
+  heapSort(order, keys, length, inverse);
+  let shift: i32 = offset + randomShift(line, from, seed, time, cycle, jitter);
+  for (let i: i32 = 0; i < length; ++i) {
+    let id: i32 = load<i32>(indices + ((from + i) << 2));
+    let target: i32 = pixels + (id << 4);
+    let source: i32 = (i + shift) % length;
+    if (source < 0) source += length;
+    let sorted: i32 = original + (load<i32>(order + (source << 2)) << 4);
+    let unsorted: i32 = original + (i << 4);
+    let blend: f32 = 1.0;
+    if (featherStart > 0 && i < featherStart)
+      blend = min<f32>(blend, <f32>(i + 1) / <f32>(featherStart + 1));
+    if (featherEnd > 0 && length - 1 - i < featherEnd)
+      blend = min<f32>(blend, <f32>(length - i) / <f32>(featherEnd + 1));
+    let aOriginal: f32 = load<f32>(unsorted + 12);
+    let aSorted: f32 = load<f32>(sorted + 12);
+    for (let c: i32 = 0; c < 3; ++c) {
+      let before: f32 = load<f32>(unsorted + (c << 2));
+      let after: f32 = load<f32>(sorted + (c << 2));
+      if (preserve) after = aSorted > 0.000001 ? after * aOriginal / aSorted : 0.0;
+      store<f32>(target + (c << 2), before * (1.0 - blend) + after * blend);
+    }
+    store<f32>(target + 12, preserve ? aOriginal : aOriginal * (1.0 - blend) + aSorted * blend);
+  }
+  // Optional one-dimensional box blur, using the sorted frame as input.
+  if (blurRadius > 0) {
+    for (let i: i32 = 0; i < length; ++i) {
+      let id: i32 = load<i32>(indices + ((from + i) << 2));
+      memory.copy(original + (i << 4), pixels + (id << 4), 16);
+    }
+    for (let i: i32 = 0; i < length; ++i) {
+      let dest: i32 = pixels + (load<i32>(indices + ((from + i) << 2)) << 4);
+      let lo: i32 = max<i32>(0, i - blurRadius);
+      let hi: i32 = min<i32>(length - 1, i + blurRadius);
+      let n: f32 = <f32>(hi - lo + 1);
+      let alphaBefore: f32 = load<f32>(original + (i << 4) + 12);
+      let alphaMean: f32 = 0.0;
+      for (let j: i32 = lo; j <= hi; ++j) alphaMean += load<f32>(original + (j << 4) + 12);
+      alphaMean /= n;
+      for (let c: i32 = 0; c < 3; ++c) {
+        let sum: f32 = 0.0;
+        for (let j: i32 = lo; j <= hi; ++j)
+          sum += load<f32>(original + (j << 4) + (c << 2));
+        let result: f32 = sum / n;
+        if (preserve) result = alphaMean > 0.000001 ? result * alphaBefore / alphaMean : 0.0;
+        store<f32>(dest + (c << 2), result);
+      }
+      store<f32>(dest + 12, preserve ? alphaBefore : alphaMean);
+    }
+  }
+}
+
+function diagnosticPixel(pixels: i32, index: i32, brightness: f32): void {
+  let dest: i32 = pixels + (index << 4);
+  let a: f32 = load<f32>(dest + 12);
+  let value: f32 = bound(brightness) * a;
+  store<f32>(dest, value);
+  store<f32>(dest + 4, value);
+  store<f32>(dest + 8, value);
+}
+
+export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
+                          nparams: i32, time: f64, scale: f64): i32 {
+  if (width <= 0 || height <= 0 || width > 16384 || height > 16384 || nparams != 18)
+    return 1;
+  let total: i32 = width * height;
+  if (total > MAX_PIXELS || params != HOST_BUFFER || pixels != params + (nparams << 3)
+      || pixels + (total << 4) > (memory.size() << 16)) return 2;
+
+  let highlights: bool = param(params, 0, 0, 1, 0) < 0.5;
+  let trigger: i32 = <i32>param(params, 1, 0, 8, 6);
+  let sortBy: i32 = <i32>param(params, 2, 0, 9, 7);
+  let angle: f64 = param(params, 3, -360000, 360000, 0) * Math.PI / 180.0;
+  let threshold: f32 = <f32>(param(params, 4, 0, 100, 40) / 100.0);
+  let inverse: bool = param(params, 5, 0, 1, 0) >= 0.5;
+  let block: i32 = <i32>Math.round(param(params, 6, 1, 64, 1));
+  let preview: f64 = clamp(scale, 0.01, 4.0, 1.0);
+  let limit: i32 = <i32>Math.round(param(params, 7, 0, 8192, 0) * preview);
+  let offset: i32 = <i32>Math.round(param(params, 8, -2048, 2048, 0) * preview);
+  let jitter: i32 = <i32>Math.round(param(params, 9, 0, 512, 0) * preview);
+  let cycle: f64 = param(params, 10, 0, 30, 0);
+  let seed: i32 = <i32>param(params, 11, 0, 999999, 0);
+  let featherStart: i32 = <i32>Math.round(param(params, 12, 0, 128, 0) * preview);
+  let featherEnd: i32 = <i32>Math.round(param(params, 13, 0, 128, 0) * preview);
+  let smooth: i32 = <i32>Math.round(param(params, 14, 0, 8, 0) * preview);
+  let blurRadius: i32 = <i32>Math.round(param(params, 15, 0, 8, 0) * preview);
+  let output: i32 = <i32>param(params, 16, 0, 3, 0);
+  let preserve: bool = param(params, 17, 0, 1, 1) >= 0.5;
+
+  let dx: f64 = Math.cos(angle), dy: f64 = Math.sin(angle);
+  let xMajor: bool = Math.abs(dx) >= Math.abs(dy);
+  let slope: f64 = xMajor ? dy / dx : dx / dy; // dominant component is nonzero
+  let span: i32 = xMajor ? width : height;
+  let minor: i32 = xMajor ? height : width;
+  // Keep the bin origin aligned to whole blocks: at 0°, adjacent rows 0/1
+  // must form one bucket when Block Size is 2, not straddle a shifted boundary.
+  let shift: f64 = slope >= 0
+    ? Math.ceil(Math.abs(slope) * <f64>(span - 1) / <f64>block) * <f64>block : 0.0;
+  let bins: i32 = (<i32>Math.ceil(<f64>minor + Math.abs(slope) * <f64>(span - 1) + 4.0) / block) + 3;
+  if (bins <= 0 || bins > 32768) return 3;
+  let scratch: i32 = (pixels + (total << 4) + 7) & ~7;
+  let counts: i32 = scratch;
+  let cursors: i32 = counts + (bins << 2);
+  let indices: i32 = cursors + (bins << 2);
+  let tail: i32 = indices + (total << 2);
+  if (!growTo(tail)) return 4;
+  memory.fill(counts, 0, <usize>(bins << 3));
+  for (let y: i32 = 0; y < height; ++y) for (let x: i32 = 0; x < width; ++x) {
+    let line: i32 = lineBin(x, y, xMajor, slope, shift, block);
+    if (line < 0 || line >= bins) return 5;
+    store<i32>(counts + (line << 2), load<i32>(counts + (line << 2)) + 1);
+  }
+  let largest: i32 = 0, running: i32 = 0;
+  for (let line: i32 = 0; line < bins; ++line) {
+    let length: i32 = load<i32>(counts + (line << 2));
+    store<i32>(cursors + (line << 2), running);
+    running += length;
+    largest = max<i32>(largest, length);
+  }
+  if (running != total) return 6;
+  let values: i32 = tail;
+  let keys: i32 = values + (largest << 2);
+  let order: i32 = keys + (largest << 2);
+  let original: i32 = order + (largest << 2);
+  if (!growTo(original + (largest << 4))) return 7;
+  // Insert by increasing major coordinate; each bucket is a distinct scanline.
+  let forward: bool = (xMajor ? dx : dy) >= 0.0;
+  for (let major: i32 = 0; major < span; ++major) {
+    let position: i32 = forward ? major : span - 1 - major;
+    for (let k: i32 = 0; k < minor; ++k) {
+      let x: i32 = xMajor ? position : k;
+      let y: i32 = xMajor ? k : position;
+      let line: i32 = lineBin(x, y, xMajor, slope, shift, block);
+      let destination: i32 = load<i32>(cursors + (line << 2));
+      store<i32>(indices + (destination << 2), y * width + x);
+      store<i32>(cursors + (line << 2), destination + 1);
+    }
+  }
+  for (let line: i32 = 0; line < bins; ++line) {
+    let length: i32 = load<i32>(counts + (line << 2));
+    if (length == 0) continue;
+    let start: i32 = load<i32>(cursors + (line << 2)) - length;
+    for (let i: i32 = 0; i < length; ++i) {
+      let id: i32 = load<i32>(indices + ((start + i) << 2));
+      store<f32>(values + (i << 2), metric(pixels + (id << 4), trigger, false));
+    }
+    if (output == 3) { // Trigger map diagnostic.
+      for (let i: i32 = 0; i < length; ++i)
+        diagnosticPixel(pixels, load<i32>(indices + ((start + i) << 2)),
+                        bound(smoothMetric(values, i, length, smooth)));
+      continue;
+    }
+    let at: i32 = 0;
+    while (at < length) {
+      let id: i32 = load<i32>(indices + ((start + at) << 2));
+      let alpha: f32 = load<f32>(pixels + (id << 4) + 12);
+      let active: bool = alpha > 0.000001 && inRange(values, at, length, smooth, threshold, highlights);
+      if (!active) {
+        if (output != 0) diagnosticPixel(pixels, id, 0.0);
+        ++at;
+        continue;
+      }
+      let first: i32 = at;
+      do {
+        ++at;
+        if (at >= length) break;
+        id = load<i32>(indices + ((start + at) << 2));
+        alpha = load<f32>(pixels + (id << 4) + 12);
+      } while (alpha > 0.000001 && inRange(values, at, length, smooth, threshold, highlights));
+      for (let off: i32 = first; off < at;) {
+        let n: i32 = limit > 0 ? min<i32>(limit, at - off) : at - off;
+        if (output == 0) {
+          sortSegment(pixels, indices, start + off, n, original, order, keys,
+                      sortBy, inverse, preserve, offset, jitter, seed, line,
+                      time, cycle, featherStart, featherEnd, blurRadius);
+        } else {
+          for (let i: i32 = 0; i < n; ++i) {
+            let index: i32 = load<i32>(indices + ((start + off + i) << 2));
+            let level: f32 = output == 2 ? 1.0 : <f32>i / <f32>max<i32>(1, n - 1);
+            diagnosticPixel(pixels, index, level);
+          }
+        }
+        off += n;
+      }
+    }
+  }
+  return 0;
+}

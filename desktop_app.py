@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native desktop UI for Premiere → FilmCraft and experimental FilmCraft → Premiere.
+"""Native desktop UI for project/shortcut conversion and an EffectCraft plug-in port.
 Built with PySide6. No browser/server is used.
 """
 from __future__ import annotations
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
 from reverse_project import ReportWriteError
 from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
+from aex_to_effectcraft import convert_aex, output_stem
 
 APP_NAME='FilmCraft PRPROJ Converter'
 
@@ -60,6 +61,16 @@ TEXT = {
         'templates_needed_title':'Недоступна оболочка Premiere','templates_needed':'Эти проекты пропущены:\n{details}\n\nУдалите путь или выберите существующую оболочку. Остальные проекты будут обработаны.',
         'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — используйте отдельное окно','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
         'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
+        'plugin_button':'EffectCraft: .aex → .wasm',
+        'plugin_title':'Эффект для EffectCraft', 'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
+        'plugin_note':'Только распознанный AE Pixel Sorter 2. Создаётся самостоятельный рабочий WASM-эффект сортировки пикселей, а не копия/перевод закрытого .aex. Установщик не нужен. Визуальное совпадение с AE не гарантировано.',
+        'plugin_input':'Исходный файл AE Pixel Sorter 2 .aex', 'plugin_output':'Новый файл плагина .wasm',
+        'plugin_choose':'Выберите AE Pixel Sorter 2 .aex',
+        'plugin_filter':'Плагины Adobe (*.aex *.aex.txt);;Все файлы (*)',
+        'plugin_save':'Сохранить независимый плагин EffectCraft',
+        'plugin_save_filter':'Плагин EffectCraft (*.wasm)',
+        'plugin_missing':'Выберите существующий файл AE Pixel Sorter 2 .aex.',
+        'plugin_summary':'WASM с 18 параметрами. Это независимая реализация, а не оригинал; подробности и ограничения в отчёте.',
     },
     'en': {
         'window_title':'Premiere ↔ FilmCraft Converter','header_title':'Premiere  ↔  FilmCraft',
@@ -101,6 +112,16 @@ TEXT = {
         'templates_needed_title':'Premiere shell unavailable','templates_needed':'These projects were skipped:\n{details}\n\nClear the path or select an existing empty shell. Other projects will continue.',
         'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the separate shortcuts dialog','invalid_missing':'file not found','invalid_more':'…and {n} more',
         'report_write_failed':'Project created, but the report could not be saved: {error}',
+        'plugin_button':'EffectCraft: .aex → .wasm',
+        'plugin_title':'EffectCraft Effect', 'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
+        'plugin_note':'Recognized AE Pixel Sorter 2 only. Generates a working, independently written pixel-sorting WASM effect, not a copy or translation of the closed-source .aex. No installer required. AE visual parity is not guaranteed.',
+        'plugin_input':'Input AE Pixel Sorter 2 .aex', 'plugin_output':'New .wasm effect file',
+        'plugin_choose':'Choose AE Pixel Sorter 2 .aex',
+        'plugin_filter':'Adobe plug-ins (*.aex *.aex.txt);;All files (*)',
+        'plugin_save':'Save independent EffectCraft plug-in',
+        'plugin_save_filter':'EffectCraft plug-in (*.wasm)',
+        'plugin_missing':'Choose an existing AE Pixel Sorter 2 .aex file.',
+        'plugin_summary':'WASM effect with 18 controls. This is an independent implementation; see the report for its limitations.',
     }
 }
 
@@ -192,6 +213,78 @@ class ShortcutConverterDialog(QDialog):
                 f'## {tr(self.language, "report_result")}\n\n' + '\n'.join('- ' + x for x in warnings) + '\n',
                 encoding='utf-8')
             QMessageBox.information(self, tr(self.language, 'conversion_done'), tr(self.language, 'file_created', path=output, summary=warnings[0] if warnings else tr(self.language, 'shortcut_summary_default'), report=report.name))
+        except Exception as exc:
+            QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
+
+
+class AexConverterDialog(QDialog):
+    """Separate tool for plug-ins, not another project-import window."""
+    def __init__(self, parent=None, language='ru'):
+        super().__init__(parent)
+        self.language = language
+        self.setMinimumWidth(680)
+        self.setStyleSheet('''QDialog{background:#0d1118;color:#edf2f7;font-family:"Segoe UI",Arial,sans-serif;font-size:13px} QLabel{color:#edf2f7} QLabel#muted{color:#9aa6b5;font-size:12px} QLineEdit{background:#0a0e14;border:1px solid #343f4e;border-radius:8px;padding:9px;color:#e9eef4} QPushButton{background:#1b232e;border:1px solid #394555;border-radius:8px;padding:8px 12px;color:#e2e8ef;font-weight:650} QPushButton#primary{background:#71e0bd;color:#08271d;border:0;font-weight:800}''')
+        root = QVBoxLayout(self); root.setContentsMargins(20, 18, 20, 18); root.setSpacing(12)
+        self.title_label = QLabel(); self.title_label.setStyleSheet('font-size:19px;font-weight:750'); root.addWidget(self.title_label)
+        self.note_label = QLabel(); self.note_label.setObjectName('muted'); self.note_label.setWordWrap(True); root.addWidget(self.note_label)
+        row = QHBoxLayout(); self.input_edit = QLineEdit(); self.input_btn = QPushButton(); self.input_btn.clicked.connect(self.choose_input); row.addWidget(self.input_edit, 1); row.addWidget(self.input_btn); root.addLayout(row)
+        row = QHBoxLayout(); self.output_edit = QLineEdit(); self.output_btn = QPushButton(); self.output_btn.clicked.connect(self.choose_output); row.addWidget(self.output_edit, 1); row.addWidget(self.output_btn); root.addLayout(row)
+        footer = QHBoxLayout(); footer.addStretch(); self.cancel_btn = QPushButton(); self.cancel_btn.clicked.connect(self.reject); self.run_btn = QPushButton(); self.run_btn.setObjectName('primary'); self.run_btn.clicked.connect(self.convert); footer.addWidget(self.cancel_btn); footer.addWidget(self.run_btn); root.addLayout(footer)
+        self.retranslate()
+
+    def retranslate(self):
+        self.setWindowTitle(tr(self.language, 'plugin_title'))
+        self.title_label.setText(tr(self.language, 'plugin_heading'))
+        self.note_label.setText(tr(self.language, 'plugin_note'))
+        self.input_edit.setPlaceholderText(tr(self.language, 'plugin_input'))
+        self.input_btn.setText(tr(self.language, 'shortcut_file'))
+        self.output_edit.setPlaceholderText(tr(self.language, 'plugin_output'))
+        self.output_btn.setText(tr(self.language, 'save_as'))
+        self.cancel_btn.setText(tr(self.language, 'close'))
+        self.run_btn.setText(tr(self.language, 'convert'))
+
+    def choose_input(self):
+        path, _ = QFileDialog.getOpenFileName(self, tr(self.language, 'plugin_choose'),
+                                              '', tr(self.language, 'plugin_filter'))
+        if not path:
+            return
+        self.input_edit.setText(path)
+        source = Path(path)
+        stem = output_stem(source) + '_effectcraft'
+        n = 1
+        while True:
+            suffix = '' if n == 1 else f'_{n}'
+            output = source.with_name(stem + suffix + '.wasm')
+            report = output.with_name(output.stem + '_conversion_report.md')
+            if not output.exists() and not report.exists():
+                break
+            n += 1
+        self.output_edit.setText(str(output))
+
+    def choose_output(self):
+        current = self.output_edit.text().strip() or str(Path.home())
+        path, _ = QFileDialog.getSaveFileName(self, tr(self.language, 'plugin_save'),
+                                               current, tr(self.language, 'plugin_save_filter'))
+        if path:
+            self.output_edit.setText(path)
+
+    def convert(self):
+        source = Path(self.input_edit.text().strip())
+        if not source.is_file():
+            QMessageBox.warning(self, tr(self.language, 'no_source_title'),
+                                tr(self.language, 'plugin_missing'))
+            return
+        raw_output = self.output_edit.text().strip()
+        if not raw_output:
+            QMessageBox.warning(self, tr(self.language, 'no_output_title'),
+                                tr(self.language, 'no_output'))
+            return
+        output = Path(raw_output)
+        try:
+            report = convert_aex(source, output, language=self.language)
+            QMessageBox.information(self, tr(self.language, 'conversion_done'),
+                                    tr(self.language, 'file_created', path=output,
+                                       summary=tr(self.language, 'plugin_summary'), report=report))
         except Exception as exc:
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
 
@@ -308,11 +401,14 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         self.add_btn = QPushButton()
         self.add_btn.clicked.connect(self.choose_files)
+        self.plugin_btn = QPushButton()
+        self.plugin_btn.clicked.connect(self.open_aex_converter)
         self.remove_btn = QPushButton()
         self.remove_btn.clicked.connect(self.remove_selected)
         self.clear_btn = QPushButton()
         self.clear_btn.clicked.connect(self.clear_queue)
         actions.addWidget(self.add_btn)
+        actions.addWidget(self.plugin_btn)
         actions.addWidget(self.remove_btn)
         actions.addStretch()
         actions.addWidget(self.clear_btn)
@@ -455,6 +551,7 @@ class MainWindow(QMainWindow):
         self.drop.language = self.language
         self.drop.retranslate()
         self.add_btn.setText(self.t('add'))
+        self.plugin_btn.setText(self.t('plugin_button'))
         self.remove_btn.setText(self.t('remove'))
         self.clear_btn.setText(self.t('clear'))
         self.output_title.setText(self.t('output_folder'))
@@ -481,6 +578,9 @@ class MainWindow(QMainWindow):
 
     def open_shortcut_converter(self):
         ShortcutConverterDialog(self, self.language).exec()
+
+    def open_aex_converter(self):
+        AexConverterDialog(self, self.language).exec()
 
     def apply_theme(self):
         self.setStyleSheet('''

@@ -18,6 +18,7 @@ else:
 
 from project_import import FC_TO_PR, PR_TO_FC
 from test_reverse_writer import REFERENCE, SHELL
+from test_aex_to_effectcraft import sample_aex
 
 
 @unittest.skipUnless(desktop_app is not None, f'PySide6 GUI unavailable: {QT_ERROR}')
@@ -72,6 +73,33 @@ class MixedQueueUITests(unittest.TestCase):
             self.window.add_paths([str(shortcuts)])
             self.assertIn(shortcuts.name, warning.call_args.args[2])
         self.assertEqual(len(self.window.files), 2)
+
+    def test_effectcraft_dialog_stays_outside_project_queue_and_writes_wasm(self):
+        from PySide6.QtWidgets import QFileDialog
+        source = self.source.with_name('AEPixelSorter2.aex.txt')
+        source.write_bytes(sample_aex())
+        self.assertIn('.aex', self.window.plugin_btn.text())
+        with patch.object(desktop_app.AexConverterDialog, 'exec') as shown:
+            self.window.plugin_btn.click()
+            shown.assert_called_once()
+        dialog = desktop_app.AexConverterDialog(self.window, 'en')
+        self.addCleanup(dialog.close)
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
+            dialog.choose_input()
+        self.assertEqual(dialog.input_edit.text(), str(source))
+        output = Path(dialog.output_edit.text())
+        self.assertEqual(output.suffix, '.wasm')
+        with patch.object(QMessageBox, 'information') as notice, \
+             patch.object(QMessageBox, 'critical') as error:
+            dialog.convert()
+            error.assert_not_called()
+            notice.assert_called_once()
+        self.assertEqual(output.read_bytes()[:4], b'\0asm')
+        self.assertTrue(output.with_name(output.stem + '_conversion_report.md').exists())
+        self.assertEqual(self.window.files, [])  # Projects still use one shared queue.
+        with patch.object(QMessageBox, 'critical') as error:
+            dialog.convert()
+            error.assert_called_once()  # Never overwrite the existing WASM/report.
 
     def test_optional_shell_belongs_to_selected_fc_item(self):
         second = self.source.with_name('another.fcproj')
