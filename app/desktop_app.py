@@ -18,6 +18,7 @@ from craft_converter.reverse_project import ReportWriteError
 from converters.shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
 from converters.aex_to_effectcraft import (UnsupportedAexError, bounds_script_path,
                                           convert_aex, inspect_aex, output_stem)
+from craft_converter.measured_port import prepare_charts
 
 APP_NAME='Adobe Craft Converter'
 
@@ -93,7 +94,7 @@ TEXT = {
         'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — откройте вкладку «Горячие клавиши»','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
         'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
         'plugin_heading':'Плагины AE → EffectCraft',
-        'plugin_note':'Проверяйте любой .aex: PiPL сообщает имя, но не значения или алгоритм. Отдельный профиль AE добавляет метаданные; снимок значений из AE позволяет задать начальные числа для порта Deep Glow. Только Pixel Sorter 2 и Deep Glow имеют независимый WASM.',
+        'plugin_note':'Проверяйте любой .aex: известные Pixel Sorter/Deep Glow имеют готовые порты. Для неизвестного цветового эффекта можно попробовать локальный мастер: нужны два PNG-кадра, обработанных в AE. Он проверяет результат, а не переводит машинный код DLL.',
         'plugin_input':'Исходный плагин After Effects .aex', 'plugin_output':'Новый файл эффекта .wasm',
         'plugin_profile':'Профиль параметров AE .json (необязательно)',
         'plugin_profile_choose':'Выберите профиль, экспортированный скриптом из After Effects',
@@ -112,6 +113,18 @@ TEXT = {
         'plugin_glow_summary':'Созданы WASM и скрипт «apply_with_bounds.jsx» для ореола за границами футажа; настройки и ограничения — в отчёте.',
         'plugin_analyzed':'Анализ завершён · WASM не создан',
         'plugin_no_port':'Этот .aex изучен, но для его эффекта пока нет самостоятельной реализации. WASM не создавался.\nДиагностика: {report}',
+        'plugin_local_title':'ЛОКАЛЬНЫЙ МАСТЕР · ИЗМЕРЕНИЕ ЦВЕТА',
+        'plugin_local_note':'Необязательно: выберите папку, подготовьте 2 картинки, обработайте ОБЕ в установленном AE с одинаковыми настройками эффекта и положите PNG-результаты в ту же папку. Затем нажмите «Измерить и создать WASM». Только цветовые попиксельные эффекты, один набор настроек; с полем Deep Glow «Снимок чисел» не совмещать.',
+        'plugin_local_folder':'Папка с chart_training_ae.png и chart_check_ae.png',
+        'plugin_local_choose':'Папка для тестовых кадров AE',
+        'plugin_local_folder_error':'Нужна одна существующая локальная папка.',
+        'plugin_local_not_aex':'В .aex не обнаружена точка входа эффекта или PiPL.',
+        'plugin_prepare':'1. Подготовить тестовые картинки и инструкцию',
+        'plugin_prepared_status':'Картинки для AE подготовлены',
+        'plugin_prepared_message':'Созданы исходные PNG в папке {path}. Прочитайте HOW_TO_RENDER.txt. В AE примените эффект к обеим картинкам с одними настройками и экспортируйте chart_training_ae.png и chart_check_ae.png без изменения размера. Затем нажмите кнопку конвертации.',
+        'plugin_fit':'2. Измерить и создать WASM',
+        'plugin_local_summary':'Создан экспериментальный цветовой WASM для ОДНИХ настроек AE с управлением Mix. Ошибка на проверочном кадре и ограничения — в отчёте.',
+        'plugin_local_rejected':'Проверочные кадры не подтвердили надёжную цветовую модель; WASM не создан. Причина и измеренная ошибка: {report}',
     },
     'en': {
         'window_title':'Adobe ↔ Craft Converter','header_title':'Adobe  ↔  Craft',
@@ -184,7 +197,7 @@ TEXT = {
         'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the Hotkeys tab','invalid_missing':'file not found','invalid_more':'…and {n} more',
         'report_write_failed':'Project created, but the report could not be saved: {error}',
         'plugin_heading':'AE plug-ins → EffectCraft',
-        'plugin_note':'Analyze any .aex: PiPL contains identity, not values or algorithms. An AE metadata profile adds facts; a separate AE numeric snapshot can set Deep Glow port defaults. Only Pixel Sorter 2 and Deep Glow have independent WASM ports.',
+        'plugin_note':'Analyze any .aex: known Pixel Sorter/Deep Glow ports remain available. For an unknown colour effect, try the local measurement wizard using two PNG frames rendered in AE; it verifies the outcome, not native DLL instructions.',
         'plugin_input':'After Effects .aex plug-in file', 'plugin_output':'New .wasm effect file',
         'plugin_profile':'AE parameter profile .json (optional)',
         'plugin_profile_choose':'Select the profile exported inside After Effects',
@@ -203,6 +216,18 @@ TEXT = {
         'plugin_glow_summary':'WASM plus apply_with_bounds.jsx script for halos beyond footage; settings and limits are in the report.',
         'plugin_analyzed':'Analysis complete · no WASM created',
         'plugin_no_port':'This .aex was analyzed, but its effect has no independent implementation yet. No WASM was created.\nDiagnostics: {report}',
+        'plugin_local_title':'LOCAL WIZARD · COLOUR MEASUREMENT',
+        'plugin_local_note':'Optional: choose a folder and prepare two charts. Render BOTH in installed AE with the SAME effect settings, save the two PNG results in that folder, then click Fit and create WASM. Pixel-local colour effects only, one fixed preset; do not combine with the Deep Glow numeric snapshot.',
+        'plugin_local_folder':'Folder with chart_training_ae.png and chart_check_ae.png',
+        'plugin_local_choose':'Folder for AE reference frames',
+        'plugin_local_folder_error':'Select one existing local folder.',
+        'plugin_local_not_aex':'No AE effect entry point or PiPL was found in this DLL.',
+        'plugin_prepare':'1. Prepare sample PNGs and instructions',
+        'plugin_prepared_status':'AE test charts prepared',
+        'plugin_prepared_message':'Input PNGs were created in {path}. Read HOW_TO_RENDER.txt. In AE apply the effect to both charts at the same settings, export chart_training_ae.png and chart_check_ae.png without resizing, then run the conversion.',
+        'plugin_fit':'2. Fit and create WASM',
+        'plugin_local_summary':'Experimental colour-only WASM for ONE AE preset, with a Mix control. See the measured hold-out error and limitations in the report.',
+        'plugin_local_rejected':'Reference frames did not validate a reliable colour model; no WASM was created. See measured error and reason: {report}',
     }
 }
 
@@ -564,7 +589,29 @@ class AexConverterPanel(FileConverterPanel):
         self.values_hint.setObjectName('muted')
         self.values_hint.setWordWrap(True)
         self.source_layout.addWidget(self.values_hint)
+        # The optional, local-reference workflow lives INSIDE the existing
+        # plug-in page and uses the shared framed-card layout, not a second app.
+        reference_panel, reference_layout = self.card()
+        self.reference_title = QLabel()
+        self.reference_title.setObjectName('section')
+        self.reference_note = QLabel()
+        self.reference_note.setObjectName('muted')
+        self.reference_note.setWordWrap(True)
+        reference_layout.addWidget(self.reference_title)
+        reference_layout.addWidget(self.reference_note)
+        self.reference_edit, self.reference_btn = self.file_row(
+            reference_layout, self.accept_reference_folders)
+        self.reference_btn.clicked.connect(self.choose_reference_dir)
+        self.prepare_btn = QPushButton()
+        self.prepare_btn.clicked.connect(self.prepare_references)
+        reference_layout.addWidget(self.prepare_btn)
+        self.details_layout.addWidget(reference_panel)
+        self.reference_edit.textChanged.connect(self.update_convert_label)
         self.retranslate()
+
+    def update_convert_label(self, *_):
+        self.run_btn.setText(tr(self.language, 'plugin_fit' if
+                                self.reference_edit.text().strip() else 'plugin_convert'))
 
     def retranslate(self):
         self.drop.language = self.language
@@ -582,9 +629,14 @@ class AexConverterPanel(FileConverterPanel):
         self.values_edit.setPlaceholderText(tr(self.language, 'plugin_values'))
         self.values_btn.setText(tr(self.language, 'shortcut_file'))
         self.values_hint.setText(tr(self.language, 'plugin_values_hint'))
+        self.reference_title.setText(tr(self.language, 'plugin_local_title'))
+        self.reference_note.setText(tr(self.language, 'plugin_local_note'))
+        self.reference_edit.setPlaceholderText(tr(self.language, 'plugin_local_folder'))
+        self.reference_btn.setText(tr(self.language, 'browse'))
+        self.prepare_btn.setText(tr(self.language, 'plugin_prepare'))
         self.output_edit.setPlaceholderText(tr(self.language, 'plugin_output'))
         self.output_btn.setText(tr(self.language, 'save_as'))
-        self.run_btn.setText(tr(self.language, 'plugin_convert'))
+        self.update_convert_label()
 
     def choose_input(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -610,6 +662,7 @@ class AexConverterPanel(FileConverterPanel):
         self.input_edit.setText(str(source))
         self.profile_edit.clear()  # Profiles/snapshots for another DLL must not be reused.
         self.values_edit.clear()
+        self.reference_edit.clear()  # Never train against a previous effect's frames.
         stem = output_stem(source) + '_effectcraft'
         n = 1
         while True:
@@ -672,6 +725,43 @@ class AexConverterPanel(FileConverterPanel):
             return
         self.values_edit.setText(str(values))
 
+    def choose_reference_dir(self):
+        current = self.reference_edit.text().strip() or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(
+            self, tr(self.language, 'plugin_local_choose'), current)
+        if folder:
+            self.accept_reference_folders([folder])
+
+    def accept_reference_folders(self, paths):
+        if len(paths) != 1 or not Path(paths[0]).is_dir():
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'plugin_local_folder_error'))
+            return
+        self.reference_edit.setText(str(Path(paths[0])))
+
+    def prepare_references(self):
+        source = Path(self.input_edit.text().strip())
+        if not source.is_file():
+            QMessageBox.warning(self, tr(self.language, 'no_source_title'),
+                                tr(self.language, 'plugin_missing'))
+            return
+        if not self.reference_edit.text().strip():
+            self.choose_reference_dir()
+        folder = self.reference_edit.text().strip()
+        if not folder:
+            return
+        try:
+            info = inspect_aex(source)
+            if 'EffectMain' not in info.exports and not info.pipl_effects:
+                raise ValueError(tr(self.language, 'plugin_local_not_aex'))
+            prepare_charts(Path(folder), aex_digest=info.sha256)
+            self.set_status('plugin_prepared_status')
+            QMessageBox.information(self, tr(self.language, 'plugin_prepared_status'),
+                                    tr(self.language, 'plugin_prepared_message', path=folder))
+        except Exception as exc:
+            self.set_status('state_error')
+            QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
+
     def choose_output(self):
         current = self.output_edit.text().strip() or str(Path.home())
         path, _ = QFileDialog.getSaveFileName(
@@ -698,19 +788,24 @@ class AexConverterPanel(FileConverterPanel):
             family = inspect_aex(source).family
             profile_text = self.profile_edit.text().strip()
             values_text = self.values_edit.text().strip()
+            reference_text = self.reference_edit.text().strip()
             report = convert_aex(source, output, language=self.language,
                                  ae_profile=Path(profile_text) if profile_text else None,
-                                 ae_values=Path(values_text) if values_text else None)
+                                 ae_values=Path(values_text) if values_text else None,
+                                 reference_dir=Path(reference_text) if reference_text else None)
             self.set_status('done', name=output.name)
-            summary_key = 'plugin_glow_summary' if family == 'deep_glow' else 'plugin_pixel_summary'
+            summary_key = ('plugin_local_summary' if reference_text else
+                           'plugin_glow_summary' if family == 'deep_glow' else
+                           'plugin_pixel_summary')
             QMessageBox.information(
                 self, tr(self.language, 'conversion_done'),
                 tr(self.language, 'file_created', path=output,
                    summary=tr(self.language, summary_key), report=report))
         except UnsupportedAexError as exc:
             self.set_status('plugin_analyzed')
+            key = 'plugin_local_rejected' if self.reference_edit.text().strip() else 'plugin_no_port'
             QMessageBox.warning(self, tr(self.language, 'plugin_analyzed'),
-                                tr(self.language, 'plugin_no_port', report=exc.report))
+                                tr(self.language, key, report=exc.report))
         except Exception as exc:
             self.set_status('state_error')
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))

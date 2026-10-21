@@ -1,0 +1,12 @@
+{
+  "api": 1,
+  "id": "org.artcraft_converter.measured.template",
+  "name": "Measured colour effect (template)",
+  "category": "Color Correction",
+  "version": "0.1.0",
+  "author": "ArtCraft Converter contributors",
+  "description": "Template for a measured 3D colour LUT at one AE setting. The converter only exports an effect after reference-frame validation. Not a translation of the .aex binary.",
+  "params": [
+    {"id": "mix", "name": "Mix (%)", "type": "slider", "default": 100, "min": 0, "max": 100, "decimals": 0}
+  ]
+}

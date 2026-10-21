@@ -48,6 +48,8 @@ CORE_MODULES = frozenset({
     'craft_converter/premiere_text.py', 'craft_converter/premiere_text_seed.py',
     'craft_converter/effectcraft_pixel_sorter.py',
     'craft_converter/effectcraft_deep_glow.py',
+    'craft_converter/effectcraft_measured_lut.py',
+    'craft_converter/lut_layout.py', 'craft_converter/measured_port.py',
 })
 SHORTCUT_TEMPLATES = frozenset({
     'resources/shortcuts/FilmCraft_Shortcuts_Template.json',

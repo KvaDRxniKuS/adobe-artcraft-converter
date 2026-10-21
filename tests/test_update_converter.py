@@ -172,12 +172,14 @@ class UpdaterTests(unittest.TestCase):
             self.assertTrue((output / name).is_file(), name)
         for name in ('direct_fc_to_prproj.py', 'graphic_raster.py', 'premiere_text.py',
                      'premiere_text_seed.py', 'effectcraft_pixel_sorter.py',
-                     'effectcraft_deep_glow.py'):
+                     'effectcraft_deep_glow.py', 'effectcraft_measured_lut.py',
+                     'lut_layout.py', 'measured_port.py'):
             self.assertFalse((output / name).exists(), name)
             self.assertTrue((output / 'craft_converter' / name).is_file(), name)
         # Embedded WASM is shipped as Python data; only allowlisted AE-host
         # scripts enter tools (no binary build products or .aex inputs).
-        for name in ('effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py'):
+        for name in ('effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py',
+                     'effectcraft_measured_lut.py'):
             self.assertEqual((output / 'craft_converter' / name).read_bytes(),
                              (repository / 'craft_converter' / name).read_bytes())
         self.assertFalse((output / 'effectcraft_plugins').exists())

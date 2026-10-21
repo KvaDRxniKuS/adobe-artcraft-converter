@@ -23,6 +23,11 @@ from craft_converter.deep_glow_defaults import customized_wasm
 from craft_converter.effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
 from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
                                    WASM_SHA256 as GLOW_SHA256)
+from craft_converter.measured_port import (
+    CHECK_AFTER, CHECK_INPUT, TRAIN_AFTER, TRAIN_INPUT, ReferenceError, build_port,
+    failure_report as measured_failure_report, fit as fit_references,
+    prepare_charts, report_text as measured_report_text,
+)
 from converters.fcproj_to_prproj import same_file
 
 MAX_AEX_BYTES = 64 * 1024 * 1024  # Limit untrusted input size, not plug-in identity.
@@ -203,9 +208,10 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
                 'EffectCraft cannot run After Effects binary code; simply lifting the '
                 'identity restriction or renaming this DLL as .wasm would produce a '
                 'non-working file. No WASM was written.\n\n'
-                'To add this effect, provide its name, settings and representative before/after '
-                'frames (and source code or public algorithm information if available). '
-                'A new independent WASM implementation must be written and tested.\n')
+                'For pixel-local colour effects, try the local reference wizard: generate two '
+                'charts with --prepare-reference, render both in AE, then use --reference-dir. '
+                'A validated fixed-setting colour LUT may be exported. Other effects need '
+                'an independently written and tested renderer.\n')
     return (f'# Анализ .aex — WASM не создан\n\n'
             f'- Вход: `{source.name}` ({info.size} байт, PE {info.architecture})\n'
             f'- SHA-256: `{info.sha256}`\n'
@@ -220,9 +226,10 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
             'нет отдельной реализации. EffectCraft не исполняет код плагинов After Effects: '
             'снятие проверки имени или переименование в .wasm не создаст рабочий эффект. '
             'Файл WASM не создан.\n\n'
-            'Чтобы добавить эффект, нужны его название, настройки и характерные кадры '
-            'до/после (по возможности — исходники или опубликованное описание алгоритма). '
-            'Понадобится отдельная реализация WASM и проверка её работы.\n')
+            'Для попиксельного цветового эффекта можно попробовать локальный мастер: '
+            'создайте две картинки (--prepare-reference), обработайте их в AE и передайте '
+            '--reference-dir. После проверки он может выдать цветовую 3D-таблицу для одних '
+            'настроек. Для остальных эффектов нужен отдельный проверенный рендерер.\n')
 
 
 def bounds_script_path(output: Path) -> Path:
@@ -374,26 +381,69 @@ def report_text(source: Path, output: Path, info: AexDetails, language: str = 'r
 
 
 def convert_aex(source: Path, output: Path, *, language: str = 'ru',
-                ae_profile: Path | None = None, ae_values: Path | None = None) -> Path:
-    """Export implemented ports; AE metadata and numeric settings are separate opt-ins."""
+                ae_profile: Path | None = None, ae_values: Path | None = None,
+                reference_dir: Path | None = None) -> Path:
+    """Export known ports or a validated, fixed-setting measured colour port."""
     source, output = Path(source), Path(output)
     ae_profile = Path(ae_profile) if ae_profile is not None else None
     ae_values = Path(ae_values) if ae_values is not None else None
+    reference_dir = Path(reference_dir) if reference_dir is not None else None
     if output.suffix.lower() != '.wasm':
         raise ValueError('Результат должен иметь расширение .wasm.')
     conversion_report = output.with_name(output.stem + '_conversion_report.md')
     analysis_report = output.with_name(output.stem + '_aex_analysis.md')
     script = bounds_script_path(output)
+    originals = [path for path in (source, ae_profile, ae_values) if path is not None]
+    if reference_dir is not None:
+        originals.extend(reference_dir / filename for filename in
+                         (TRAIN_INPUT, TRAIN_AFTER, CHECK_INPUT, CHECK_AFTER))
     if any(same_file(candidate, original)
            for candidate in (output, conversion_report, analysis_report, script)
-           for original in (source, ae_profile, ae_values) if original is not None):
-        raise ValueError('Результат не должен перезаписывать исходный .aex или профиль AE.')
+           for original in originals):
+        raise ValueError('Результат не должен перезаписывать исходный .aex, профиль или кадры AE.')
     info = inspect_aex(source)
-    report = conversion_report if info.family in _PORTS else analysis_report
-    script = script if info.family == 'deep_glow' else None
-    if output.exists() or report.exists() or (script is not None and script.exists()):
+    report = conversion_report if reference_dir is not None or info.family in _PORTS else analysis_report
+    script = script if reference_dir is None and info.family == 'deep_glow' else None
+    if (output.exists() or report.exists() or (script is not None and script.exists())
+            or (reference_dir is not None and analysis_report.exists())):
         raise FileExistsError('Файл результата, отчёта или скрипта уже существует; выберите другое имя.')
     profile = load_ae_profile(ae_profile, info.pipl_effects) if ae_profile else None
+    if reference_dir is not None:
+        if ae_values:
+            raise ValueError('Снимок чисел Deep Glow нельзя совмещать с измеренным цветовым портом.')
+        if 'EffectMain' not in info.exports and not info.pipl_effects:
+            raise ReferenceError('В DLL не найден EffectMain или AE PiPL; нужен действующий .aex эффекта.')
+        fitted = fit_references(reference_dir, info.sha256)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if not fitted.accepted:
+            text = measured_failure_report(info, fitted, language)
+            if profile:
+                text += '\n' + profile_report(profile, language)
+            with analysis_report.open('x', encoding='utf-8') as file:
+                file.write(text)
+            raise UnsupportedAexError(analysis_report)
+        # One DLL may expose several effects; the PNGs cannot identify which
+        # one the user actually applied inside AE. Avoid claiming the first PiPL.
+        effect_name = (info.pipl_effects[0].name if len(info.pipl_effects) == 1
+                       else output_stem(source))
+        wasm, manifest = build_port(info.sha256, effect_name, fitted)
+        text = measured_report_text(source, output, info, manifest, fitted,
+                                    language) + pipl_report_line(info, language)
+        if profile:
+            text += '\n' + profile_report(profile, language)
+        created = []
+        try:
+            with output.open('xb') as file:
+                created.append(output)
+                file.write(wasm)
+            with conversion_report.open('x', encoding='utf-8') as file:
+                created.append(conversion_report)
+                file.write(text)
+        except BaseException:
+            for path in created:
+                path.unlink(missing_ok=True)
+            raise
+        return conversion_report
     if ae_values and info.family != 'deep_glow':
         raise ValueError('Снимок числовых значений AE поддерживается только для Deep Glow.')
     settings = load_ae_settings(ae_values, info.pipl_effects) if ae_values else None
@@ -467,16 +517,40 @@ def main(argv: list[str] | None = None) -> int:
                         help='Optional value-free AE-host metadata JSON; reports only, not a renderer')
     parser.add_argument('--ae-values', type=Path,
                         help='Optional Deep Glow numeric settings snapshot exported from a selected AE effect')
+    parser.add_argument('--prepare-reference', type=Path, metavar='DIR',
+                        help='Generate two local PNG colour charts for rendering in installed AE')
+    parser.add_argument('--reference-dir', type=Path, metavar='DIR',
+                        help='Fit a fixed-setting RGB LUT from the two AE-rendered PNG charts in DIR')
     args = parser.parse_args(argv)
+    if args.prepare_reference:
+        if args.reference_dir or args.ae_values or args.ae_profile or args.output:
+            parser.error('--prepare-reference takes only the input .aex and directory')
+        info = inspect_aex(args.input)
+        if 'EffectMain' not in info.exports and not info.pipl_effects:
+            parser.error('Input is not an identified AE effect DLL')
+        training, check = prepare_charts(args.prepare_reference, aex_digest=info.sha256)
+        print(f'Charts: {training}\n        {check}\n'
+              f'Export AE-rendered PNGs into this folder; see {args.prepare_reference / "HOW_TO_RENDER.txt"}')
+        return 0
     output = args.output or args.input.with_name(output_stem(args.input) + '_effectcraft.wasm')
     try:
         report = convert_aex(args.input, output, language=args.language,
-                             ae_profile=args.ae_profile, ae_values=args.ae_values)
+                             ae_profile=args.ae_profile, ae_values=args.ae_values,
+                             reference_dir=args.reference_dir)
     except UnsupportedAexError as exc:
-        print(f'Нет независимого порта; WASM не создан. Диагностика: {exc.report}', file=sys.stderr)
+        if args.language == 'en':
+            reason = ('Reference validation rejected the measured colour port' if args.reference_dir
+                      else 'No independent port is available')
+            print(f'{reason}; no WASM created. Report: {exc.report}', file=sys.stderr)
+        else:
+            reason = ('Эталоны не подтвердили измеренный цветовой порт' if args.reference_dir
+                      else 'Нет независимого порта')
+            print(f'{reason}; WASM не создан. Диагностика: {exc.report}', file=sys.stderr)
         return 2
     print(f'Создано: {output}\nОтчёт: {report}')
-    if inspect_aex(args.input).family == 'deep_glow':
+    if args.reference_dir:
+        print('Создан экспериментальный измеренный цветовой порт с Mix; настройки AE не перенесены.')
+    elif inspect_aex(args.input).family == 'deep_glow':
         print(f'Применение с расширенными границами: {bounds_script_path(output)}')
     return 0
 

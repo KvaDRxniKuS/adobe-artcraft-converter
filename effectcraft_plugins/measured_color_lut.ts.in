@@ -1,0 +1,72 @@
+// Generic measured 3D colour transform for EffectCraft WASM API v1.
+// Trained on user-provided AE reference frames, NOT translated from AE code.
+// The 17^3 RGB table and per-effect manifest are patched into two data slots.
+const MANIFEST_PTR: usize = memory.data<u8>([__MANIFEST_BYTES__]);
+const MANIFEST_LEN: i32 = __MANIFEST_LEN__;
+const SLOT_PTR: usize = memory.data<u8>([__SLOT_BYTES__]);
+const LUT_PTR: i32 = <i32>SLOT_PTR + __PREFIX_LEN__;
+const HOST_BUFFER: i32 = 65536;
+const MAX_PIXELS: i32 = 9000000;
+const GRID: i32 = 17;
+
+export function ec_api_version(): i32 { return 1; }
+export function ec_manifest_ptr(): i32 { return <i32>MANIFEST_PTR; }
+export function ec_manifest_len(): i32 { return MANIFEST_LEN; }
+
+export function ec_alloc(bytes: i32): i32 {
+  if (bytes <= 0 || bytes > MAX_PIXELS * 16 + 1024) return 0;
+  let pages: i32 = (HOST_BUFFER + bytes + 65535) >> 16;
+  if (pages > memory.size() && memory.grow(pages - memory.size()) < 0) return 0;
+  return HOST_BUFFER;
+}
+
+function bound(value: f32): f32 {
+  // NaN or infinities should never become invalid LUT indexes.
+  if (value != value || value < -1.0e9 || value > 1.0e9) return 0.0;
+  return max<f32>(0.0, min<f32>(1.0, value));
+}
+function lut(r: i32, g: i32, b: i32, c: i32): f32 {
+  return <f32>load<u8>(LUT_PTR + (((r * GRID + g) * GRID + b) * 3 + c)) / 255.0;
+}
+
+export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
+                          nparams: i32, time: f64, scale: f64): i32 {
+  if (nparams != 1 || width <= 0 || height <= 0 || width > MAX_PIXELS / height) return 1;
+  let size: i32 = width * height * 16;
+  if (params < HOST_BUFFER || pixels < params + 8 || pixels < HOST_BUFFER ||
+      pixels > memory.size() * 65536 - size) return 2;
+  let raw: f64 = load<f64>(params);
+  if (raw != raw || raw < -1000000 || raw > 1000000) raw = 100.0;
+  let mix: f32 = <f32>(max<f64>(0.0, min<f64>(100.0, raw)) / 100.0);
+  if (mix == 0.0) return 0;
+  for (let p: i32 = pixels; p < pixels + size; p += 16) {
+    let alpha: f32 = load<f32>(p + 12);
+    if (!(alpha > 0.000001) || !(alpha <= 1.0)) continue;
+    let r: f32 = bound(load<f32>(p) / alpha) * 16.0;
+    let g: f32 = bound(load<f32>(p + 4) / alpha) * 16.0;
+    let b: f32 = bound(load<f32>(p + 8) / alpha) * 16.0;
+    let ri: i32 = min<i32>(15, <i32>r);
+    let gi: i32 = min<i32>(15, <i32>g);
+    let bi: i32 = min<i32>(15, <i32>b);
+    let rf: f32 = r - <f32>ri;
+    let gf: f32 = g - <f32>gi;
+    let bf: f32 = b - <f32>bi;
+    for (let c: i32 = 0; c < 3; c++) {
+      let v: f32 = 0.0;
+      for (let dr: i32 = 0; dr <= 1; dr++) {
+        let rw: f32 = dr == 0 ? 1.0 - rf : rf;
+        for (let dg: i32 = 0; dg <= 1; dg++) {
+          let gw: f32 = dg == 0 ? 1.0 - gf : gf;
+          for (let db: i32 = 0; db <= 1; db++) {
+            let bw: f32 = db == 0 ? 1.0 - bf : bf;
+            v += lut(ri + dr, gi + dg, bi + db, c) * rw * gw * bw;
+          }
+        }
+      }
+      let before: f32 = load<f32>(p + (c << 2));
+      store<f32>(p + (c << 2), before * (1.0 - mix) + v * alpha * mix);
+    }
+    // RGB is premultiplied; alpha and frame size are preserved exactly.
+  }
+  return 0;
+}

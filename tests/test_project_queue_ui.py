@@ -470,6 +470,38 @@ class MixedQueueUITests(unittest.TestCase):
         self.assertEqual(self.window.shell_edit.text(), str(self.shell))
         self.assertTrue(self.window.raster_checkbox.isChecked())
 
+    def test_local_aex_reference_wizard_stays_in_plugins_page(self):
+        from PIL import Image, ImageOps
+        from craft_converter.measured_port import (TRAIN_INPUT, CHECK_INPUT,
+                                                    TRAIN_AFTER, CHECK_AFTER)
+        source = self.source.with_name('Colour.aex')
+        raw = sample_aex().replace(b'GG AEPixelSorter2', b'XX AEPixelSorter2')
+        source.write_bytes(sample_with_pipl(raw, 'Example colour', 'Color Correction', 'vendor.test'))
+        panel = self.window.plugin_panel
+        panel.accept_files([str(source)])
+        folder = self.source.parent / 'colour_refs'
+        folder.mkdir()
+        panel.reference_edit.setText(str(folder))
+        self.assertIn('Измерить', panel.run_btn.text())
+        with patch.object(QMessageBox, 'information') as info:
+            panel.prepare_references()
+            info.assert_called_once()
+        for original, rendered in ((TRAIN_INPUT, TRAIN_AFTER), (CHECK_INPUT, CHECK_AFTER)):
+            with Image.open(folder / original) as image:
+                ImageOps.invert(image.convert('RGB')).save(folder / rendered)
+        output = self.source.with_name('colour_port.wasm')
+        panel.output_edit.setText(str(output))
+        with patch.object(QMessageBox, 'information') as info:
+            panel.convert()
+            info.assert_called_once()
+        self.assertTrue(output.is_file())
+        self.assertIn('Mix', output.with_name('colour_port_conversion_report.md').read_text())
+        self.window.language_combo.setCurrentIndex(1)
+        self.assertIn('Fit and create', panel.run_btn.text())
+        panel.accept_files([str(source)])  # Changing inputs must clear stale AE references.
+        self.assertEqual(panel.reference_edit.text(), '')
+        self.assertIn('Analyze', panel.run_btn.text())
+
     def test_no_shell_required_and_no_extra_window(self):
         self.window.add_paths([str(self.premiere), str(self.source)])
         calls = []
