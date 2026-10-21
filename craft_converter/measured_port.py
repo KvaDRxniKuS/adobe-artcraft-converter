@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,8 +84,27 @@ class Fit:
         return self.reason is None
 
 
+def _image_module():
+    """Keep Pillow optional for other conversions and explain how to enable PNGs."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        if getattr(sys, 'frozen', False):
+            hint = ('Rebuild dist/FilmCraftConverter.exe from the latest sources with '
+                    'Build_Windows_EXE.bat. / Пересоберите EXE из новых исходников.')
+        else:
+            requirements = Path(__file__).resolve().parents[1] / 'config/requirements.txt'
+            hint = (f'Install into the Python running this converter: '
+                    f'"{sys.executable}" -m pip install -r "{requirements}". '
+                    'Use the same Python when starting the app. / '
+                    'Установите зависимости в тот же Python, которым запущен конвертер.')
+        raise RuntimeError(f'Pillow (Python module PIL) is required for PNG reference charts. '
+                           f'{hint}') from exc
+    return Image
+
+
 def training_chart():
-    from PIL import Image
+    Image = _image_module()
     image = Image.new('RGBA', (COLUMNS * PATCH, ROWS * PATCH), (32, 32, 32, 255))
     pixels = image.load()
     levels = [round(i * 255 / (GRID - 1)) for i in range(GRID)]
@@ -100,7 +120,7 @@ def training_chart():
 
 def check_chart():
     """Held-out gradients AND sharp edges catch purely spatial impostors."""
-    from PIL import Image
+    Image = _image_module()
     image = Image.new('RGBA', (CHECK_WIDTH, CHECK_HEIGHT), (0, 0, 0, 255))
     pixels = image.load()
     for y in range(CHECK_HEIGHT):
@@ -149,7 +169,7 @@ def prepare_charts(directory: Path, *, aex_digest: str) -> tuple[Path, Path]:
 
 
 def _load_png(path: Path, size: tuple[int, int]):
-    from PIL import Image
+    Image = _image_module()
     if not path.is_file():
         raise ReferenceError(f'Missing reference PNG: {path.name}. See {INSTRUCTIONS}.')
     if path.stat().st_size > MAX_PNG_BYTES:

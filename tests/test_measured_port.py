@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from converters.aex_to_effectcraft import (UnsupportedAexError, convert_aex,
                                           inspect_aex, main)
@@ -23,6 +24,17 @@ from test_aex_to_effectcraft import sample_aex, sample_with_pipl
 
 ROOT = Path(__file__).resolve().parents[1]
 PIL_AVAILABLE = importlib.util.find_spec('PIL') is not None
+
+
+class MissingPillowTests(unittest.TestCase):
+    def test_chart_preparation_names_the_dependency_and_the_current_interpreter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory) / 'references'
+            with patch.dict(sys.modules, {'PIL': None}):
+                with self.assertRaisesRegex(RuntimeError, 'Pillow .*requirements.txt') as error:
+                    prepare_charts(folder, aex_digest='a' * 64)
+            self.assertIn(sys.executable, str(error.exception))
+            self.assertEqual(list(folder.iterdir()), [])
 
 
 @unittest.skipUnless(PIL_AVAILABLE, 'Pillow from config/requirements.txt is needed')

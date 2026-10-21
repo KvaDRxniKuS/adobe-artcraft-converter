@@ -31,6 +31,8 @@ py -3 -m pip install -r config/requirements.txt
 py -3 -m app.desktop_app
 ```
 
+If the reference wizard reports `No module named 'PIL'`, install **Pillow** (the distribution name; `PIL` is the import name) with the **same Python** used to launch the app: `py -3 -m pip install -r config/requirements.txt`. Verify with `py -3 -c "from PIL import Image; print('Pillow OK')"`. If you start the app with `python` instead of `py -3`, substitute `python -m pip` / `python -c` in those commands. A previously built EXE is not updated by installing Python packages: rebuild it with `Build_Windows_EXE.bat`.
+
 ## Windows: build a standalone EXE
 
 1. Install Python 3.10+ with the Python Launcher (`py`).
@@ -190,6 +192,8 @@ The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premi
 py -3 -m pip install -r config/requirements.txt
 py -3 -m app.desktop_app
 ```
+
+Если мастер пишет `No module named 'PIL'`, установите **Pillow** (`PIL` — имя импортируемого модуля) **в тот же Python**, которым запускаете программу: `py -3 -m pip install -r config/requirements.txt`. Проверьте: `py -3 -c "from PIL import Image; print('Pillow OK')"`. Если запускаете через `python`, в командах используйте `python -m pip` / `python -c` вместо `py -3`. Установка пакета в Python **не обновляет** ранее собранный EXE — пересоберите его через `Build_Windows_EXE.bat`.
 
 ## Сборка EXE в Windows
 
