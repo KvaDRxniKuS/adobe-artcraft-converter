@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from .direct_fc_to_prproj import DirectWriter
-from fcproj_to_prproj import same_file
+from converters.fcproj_to_prproj import same_file
 
 
 REPORT_TEXT = {

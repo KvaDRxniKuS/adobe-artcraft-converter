@@ -1,0 +1,4 @@
+__pycache__/
+*.py[cod]
+# Optional Node compiler and Python environments for development.
+/.venv/

@@ -12,7 +12,7 @@ try:
     from PySide6.QtCore import Qt, QMimeData, QPoint, QPointF, QUrl
     from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
     from PySide6.QtWidgets import QApplication, QMessageBox, QFrame
-    import desktop_app
+    from app import desktop_app
 except (ImportError, OSError) as exc:
     desktop_app = None
     QT_ERROR = str(exc)
@@ -481,7 +481,7 @@ class MixedQueueUITests(unittest.TestCase):
             output.write_text('<PremiereData/>', encoding='utf-8')
             return output, 0
 
-        with patch('desktop_app.convert_queued_project', side_effect=convert), \
+        with patch('app.desktop_app.convert_queued_project', side_effect=convert), \
              patch.object(QMessageBox, 'warning') as warning:
             self.window.start_queue()
             self.assertTrue(self.window.worker.wait(5000))
@@ -501,7 +501,7 @@ class MixedQueueUITests(unittest.TestCase):
             destination.write_text('{}', encoding='utf-8')
             return destination, 0
 
-        with patch('desktop_app.convert_queued_project', side_effect=convert), \
+        with patch('app.desktop_app.convert_queued_project', side_effect=convert), \
              patch.object(QMessageBox, 'warning') as warning:
             self.window.start_queue()
             warning.assert_called_once()

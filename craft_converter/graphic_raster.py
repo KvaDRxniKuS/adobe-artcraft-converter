@@ -83,7 +83,7 @@ def render_graphic(graphic: dict, effects: list, fallback_width: int,
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as exc:
         raise RuntimeError('Для переноса FilmCraft Graphic нужен Pillow. Выполните: '
-                           'py -3 -m pip install -r requirements.txt') from exc
+                           'py -3 -m pip install -r config/requirements.txt') from exc
     width = max(1, int(graphic.get('width') or fallback_width))
     height = max(1, int(graphic.get('height') or fallback_height))
     if width * height > MAX_GRAPHIC_PIXELS:

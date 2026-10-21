@@ -23,7 +23,7 @@ from craft_converter.deep_glow_defaults import customized_wasm
 from craft_converter.effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
 from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
                                    WASM_SHA256 as GLOW_SHA256)
-from fcproj_to_prproj import same_file
+from converters.fcproj_to_prproj import same_file
 
 MAX_AEX_BYTES = 64 * 1024 * 1024  # Limit untrusted input size, not plug-in identity.
 _EFFECT_EXPORTS = {'EffectMain', 'PluginDataEntryFunction'}

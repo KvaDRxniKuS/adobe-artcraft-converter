@@ -28,11 +28,15 @@ API = f'https://api.github.com/repos/{REPOSITORY}'
 GITHUB_HOSTS = {'api.github.com', 'codeload.github.com', 'github.com'}
 SHA_PATTERN = re.compile(r'[a-fA-F0-9]{40}\Z')
 SAFE_PY_NAME = re.compile(r'[A-Za-z0-9_.-]+\.py\Z', re.IGNORECASE)
-# Explicit paths keep cached source layout consistent with the checkout. The
-# entry points stay in the root; support modules and templates live below it.
-ROOT_ENTRY_POINTS = frozenset({
-    'desktop_app.py', 'update_converter.py', 'prproj_to_fcproj.py',
-    'fcproj_to_prproj.py', 'shortcut_converter.py', 'aex_to_effectcraft.py',
+# Explicit paths keep cached source layout consistent with the checkout.
+# No downloaded Python entry point belongs at repository root.
+APP_MODULES = frozenset({
+    'app/__init__.py', 'app/desktop_app.py', 'app/update_converter.py',
+})
+CONVERTER_MODULES = frozenset({
+    'converters/__init__.py', 'converters/prproj_to_fcproj.py',
+    'converters/fcproj_to_prproj.py', 'converters/shortcut_converter.py',
+    'converters/aex_to_effectcraft.py',
 })
 CORE_MODULES = frozenset({
     'craft_converter/__init__.py', 'craft_converter/aex_metadata.py',
@@ -53,8 +57,8 @@ SHORTCUT_TEMPLATES = frozenset({
 # tools or arbitrary files from the tools directory.
 AE_HOST_SCRIPTS = frozenset({'tools/export_ae_effect_metadata.jsx',
                              'tools/export_ae_deep_glow_values.jsx'})
-REQUIRED_FILES = (ROOT_ENTRY_POINTS | CORE_MODULES | SHORTCUT_TEMPLATES |
-                  AE_HOST_SCRIPTS | {'requirements.txt'})
+REQUIRED_FILES = (APP_MODULES | CONVERTER_MODULES | CORE_MODULES |
+                  SHORTCUT_TEMPLATES | AE_HOST_SCRIPTS | {'config/requirements.txt'})
 MAX_BRANCHES = 40  # Unauthenticated GitHub API calls are limited to 60 per hour.
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 16 * 1024 * 1024
@@ -158,7 +162,8 @@ def valid_cached_version(folder: Path, versions: Path) -> bool:
             and valid_app_dir(folder)
             and all(not (folder / name).is_symlink() for name in REQUIRED_FILES)
             and all(not (folder / directory).is_symlink() for directory in
-                    ('craft_converter', 'resources', 'resources/shortcuts', 'tools')))
+                    ('app', 'converters', 'config', 'craft_converter',
+                     'resources', 'resources/shortcuts', 'tools')))
 
 
 def cached_app(cache_dir: Path) -> Path | None:
@@ -196,7 +201,7 @@ def download_archive(sha: str, destination: Path) -> None:
 
 
 def unpack_source(archive: Path, destination: Path) -> None:
-    """Extract only root entry points, internal modules and shortcut data."""
+    """Extract only application packages, internal modules and shortcut data."""
     destination.mkdir()
     seen = set()
     archive_root = None
@@ -216,16 +221,12 @@ def unpack_source(archive: Path, destination: Path) -> None:
             # No arbitrary directories: tests, build tools, user data and WASM
             # builds never enter the source-only cache. Only allowlisted AE-host
             # JSX scripts are included; embedded effects travel in Python.
-            if len(parts) == 2:
-                selected = SAFE_PY_NAME.fullmatch(parts[1]) or relative == 'requirements.txt'
-            elif len(parts) == 3 and parts[1] == 'craft_converter':
-                selected = SAFE_PY_NAME.fullmatch(parts[2])
-            elif len(parts) == 4 and parts[1:3] == ('resources', 'shortcuts'):
-                selected = relative in SHORTCUT_TEMPLATES
-            elif len(parts) == 3 and parts[1] == 'tools':
-                selected = relative in AE_HOST_SCRIPTS
+            if len(parts) == 3 and parts[1] in ('app', 'converters', 'craft_converter'):
+                selected = SAFE_PY_NAME.fullmatch(parts[2]) is not None
             else:
-                selected = False
+                selected = (relative == 'config/requirements.txt'
+                            or relative in SHORTCUT_TEMPLATES
+                            or relative in AE_HOST_SCRIPTS)
             if not selected:
                 continue
             if archive_root is None:
@@ -258,8 +259,9 @@ def unpack_source(archive: Path, destination: Path) -> None:
     if not valid_app_dir(destination):
         raise UpdateError('Archive lacks required application files')
     # Reject damaged/incompatible Python source before changing the selected version.
-    for path in list(destination.glob('*.py')) + list((destination / 'craft_converter').glob('*.py')):
-        compile(path.read_bytes(), str(path), 'exec')
+    for package in ('app', 'converters', 'craft_converter'):
+        for path in (destination / package).glob('*.py'):
+            compile(path.read_bytes(), str(path), 'exec')
 
 
 def save_current(cache_dir: Path, revision: Revision) -> None:
@@ -333,7 +335,7 @@ def choose_source(source_dir: Path, cache_dir: Path,
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description='Update FilmCraft Converter source and launch it')
-    parser.add_argument('--source-dir', type=Path, default=Path(__file__).resolve().parent)
+    parser.add_argument('--source-dir', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--cache-dir', type=Path, default=default_cache_dir())
     args = parser.parse_args(argv)
     try:
@@ -345,9 +347,10 @@ def main(argv=None) -> int:
         from PySide6.QtWidgets import QApplication  # noqa: F401 - verify Qt can actually load
     except (ImportError, OSError):
         print('Source cannot run without PySide6/Qt. '
-              'Install requirements.txt to use source updates (the EXE is not updated).', file=sys.stderr)
+              'Install config/requirements.txt to use source updates (the EXE is not updated).',
+              file=sys.stderr)
         return EXIT_QT_UNAVAILABLE
-    return subprocess.call([sys.executable, str(app_dir / 'desktop_app.py')], cwd=app_dir)
+    return subprocess.call([sys.executable, '-m', 'app.desktop_app'], cwd=app_dir)
 
 
 if __name__ == '__main__':

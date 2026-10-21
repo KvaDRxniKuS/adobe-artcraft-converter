@@ -4,8 +4,8 @@
 The result is embedded in a Python *source* module so the desktop/CLI converter
 works offline without npm, a Rust compiler, PyInstaller data files or executing
 any supplied Adobe binary. Requires AssemblyScript 0.28.20 to rebuild only:
-    npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20
-    python tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc
+    npm install --prefix tools/.venv/wasm-tools --no-save assemblyscript@0.28.20
+    python tools/build_pixel_sorter.py --asc tools/.venv/wasm-tools/node_modules/.bin/asc
 """
 from __future__ import annotations
 

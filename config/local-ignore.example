@@ -1,3 +1,8 @@
+# Optional legacy root-level ignores: NOT applied automatically by Git.
+# Copy these rules to .git/info/exclude in your own checkout if you create
+# virtualenvs or output files outside the nested, ignored uploads/build/dist dirs.
+# Never commit personal projects, AE snapshots or proprietary plug-ins.
+
 # Local project data and conversion results
 /uploads/
 *.fcproj

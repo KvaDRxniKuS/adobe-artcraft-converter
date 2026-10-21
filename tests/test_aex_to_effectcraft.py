@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aex_to_effectcraft import (UnsupportedAexError, bounds_script_path, convert_aex,
+from converters.aex_to_effectcraft import (UnsupportedAexError, bounds_script_path, convert_aex,
                                 inspect_aex, main, output_stem)
 from craft_converter.deep_glow_bounds import SCRIPT as BOUNDS_SCRIPT
 from craft_converter.deep_glow_defaults import customized_wasm, padded_manifest
@@ -317,6 +317,20 @@ class AexTests(unittest.TestCase):
         info = inspect_aex(self.source)
         self.assertEqual(info.pipl_effects, ())
         self.assertEqual(info.family, 'deep_glow')  # Existing label fallback still works.
+
+    def test_different_binaries_with_same_known_identity_use_one_independent_port(self):
+        """The AEX selects a prewritten port; its machine code is never lifted."""
+        first_hash = inspect_aex(self.source).sha256
+        convert_aex(self.source, self.output)
+        other = self.base / 'OtherBuild.aex'
+        modified = bytearray(sample_aex())
+        modified[0x380] ^= 0x42  # PE payload differs; export table and identity do not.
+        other.write_bytes(modified)
+        self.assertNotEqual(first_hash, inspect_aex(other).sha256)
+        second = self.base / 'OtherBuild.wasm'
+        convert_aex(other, second)
+        self.assertEqual(self.output.read_bytes(), second.read_bytes())
+        self.assertEqual(second.read_bytes(), WASM)
 
     def test_converts_to_identical_embedded_wasm_with_cautionary_report(self):
         report = convert_aex(self.source, self.output, language='en')

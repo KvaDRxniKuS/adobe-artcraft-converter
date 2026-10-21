@@ -19,12 +19,12 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-from fcproj_to_prproj import TICKS, same_file
+from converters.fcproj_to_prproj import TICKS, same_file
 from .graphic_raster import render_graphic
 from .premiere_seed import load_seed_xml
 from .premiere_text import NativeTextUnsupported, create_native_text
 from .premiere_text_seed import load_text_seed_xml
-from prproj_to_fcproj import Converter as ForwardConverter
+from converters.prproj_to_fcproj import Converter as ForwardConverter
 
 # These records describe the project shell; all media/timeline records are
 # generated afresh and linked from its root bin.

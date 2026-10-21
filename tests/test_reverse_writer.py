@@ -17,8 +17,8 @@ except ImportError:  # Keep non-Graphic tests runnable before requirements are i
     Image = None
 
 from craft_converter.direct_fc_to_prproj import DirectWriter, GraphIndex
-from fcproj_to_prproj import NativeWriter, TICKS, main as reverse_cli, same_file
-from prproj_to_fcproj import Converter
+from converters.fcproj_to_prproj import NativeWriter, TICKS, main as reverse_cli, same_file
+from converters.prproj_to_fcproj import Converter
 from craft_converter.reverse_project import (ReportWriteError, convert_reverse_project,
                              reverse_report_path)
 from test_premiere_text import TextView, flatbuffers
@@ -342,7 +342,7 @@ class DirectWriterTests(unittest.TestCase):
     def test_graphic_missing_dependency_has_an_actionable_error(self):
         self.add_graphic(raster=True)
         with patch('craft_converter.direct_fc_to_prproj.render_graphic',
-                   side_effect=RuntimeError('Установите Pillow из requirements.txt')):
+                   side_effect=RuntimeError('Установите Pillow из config/requirements.txt')):
             with self.assertRaisesRegex(RuntimeError, 'Pillow'):
                 DirectWriter(self.source).write(self.output)
         self.assertFalse(self.output.exists())

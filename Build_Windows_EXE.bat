@@ -20,18 +20,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
-py -3 -m pip install --upgrade -r requirements.txt PyInstaller
+py -3 -m pip install --upgrade -r "config\requirements.txt" PyInstaller
 if errorlevel 1 goto :failed
 
-py -3 -m PyInstaller --clean --noconfirm --onefile --windowed --name FilmCraftConverter --add-data "resources\shortcuts\Premiere_Shortcuts_Template.kys;resources\shortcuts" --add-data "resources\shortcuts\FilmCraft_Shortcuts_Template.json;resources\shortcuts" desktop_app.py
+rem Include the repository root for imports from app, converters and craft_converter.
+rem Keep the EXE and generated spec in ignored build folders, never in the root.
+py -3 -m PyInstaller --clean --noconfirm --onefile --windowed --name FilmCraftConverter --paths "." --specpath "build" --add-data "resources\shortcuts\Premiere_Shortcuts_Template.kys;resources\shortcuts" --add-data "resources\shortcuts\FilmCraft_Shortcuts_Template.json;resources\shortcuts" "app\desktop_app.py"
 if errorlevel 1 goto :failed
-
-copy /y "dist\FilmCraftConverter.exe" "%~dp0FilmCraftConverter.exe" >nul
-if errorlevel 1 goto :failed
+if not exist "dist\FilmCraftConverter.exe" goto :failed
 
 echo.
-echo Done: FilmCraftConverter.exe
-echo Double-click the EXE to launch the native desktop app.
+echo Done: dist\FilmCraftConverter.exe
+echo Double-click the EXE in dist to launch the native desktop app.
 pause
 exit /b 0
 

@@ -29,28 +29,29 @@ echo Python 3.10+ is not available, so source updates cannot be checked.
 goto :fallback_exe
 
 :run_update
-if not exist "%~dp0update_converter.py" goto :local_source
-%PYTHON_CMD% "%~dp0update_converter.py" --source-dir "%~dp0"
+if not exist "%~dp0app\update_converter.py" goto :local_source
+%PYTHON_CMD% -m app.update_converter --source-dir "%~dp0"
 if "%errorlevel%"=="42" goto :no_pyside
 if errorlevel 1 goto :failed
 goto :end
 
 :local_source
 echo Source updater is missing. Launching local files without an update check.
+if not exist "%~dp0app\desktop_app.py" goto :fallback_exe
 %PYTHON_CMD% -c "import PySide6.QtWidgets" >nul 2>nul
 if errorlevel 1 goto :no_pyside
-%PYTHON_CMD% "%~dp0desktop_app.py"
+%PYTHON_CMD% -m app.desktop_app
 if errorlevel 1 goto :failed
 goto :end
 
 :no_pyside
-echo Source updates need PySide6. Install dependencies with: %PYTHON_CMD% -m pip install -r "%~dp0requirements.txt"
+echo Source updates need PySide6. Install dependencies with: %PYTHON_CMD% -m pip install -r "%~dp0config\requirements.txt"
 goto :fallback_exe
 
 :fallback_exe
-if not exist "%~dp0FilmCraftConverter.exe" goto :need_build
-echo Starting the existing EXE. It is NOT updated by source-only updates.
-start "" "%~dp0FilmCraftConverter.exe"
+if not exist "%~dp0dist\FilmCraftConverter.exe" goto :need_build
+echo Starting the existing EXE in dist. It is NOT updated by source-only updates.
+start "" "%~dp0dist\FilmCraftConverter.exe"
 goto :end
 
 :need_build

@@ -15,9 +15,9 @@ from PySide6.QtWidgets import (
 )
 from craft_converter.project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
 from craft_converter.reverse_project import ReportWriteError
-from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
-from aex_to_effectcraft import (UnsupportedAexError, bounds_script_path,
-                                convert_aex, inspect_aex, output_stem)
+from converters.shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
+from converters.aex_to_effectcraft import (UnsupportedAexError, bounds_script_path,
+                                          convert_aex, inspect_aex, output_stem)
 
 APP_NAME='Adobe Craft Converter'
 
@@ -222,7 +222,7 @@ def unique_path(directory: Path, stem: str, suffix: str) -> Path:
 
 def resource_path(name: str) -> Path:
     """Locate shortcut templates in source, cached updates and PyInstaller EXEs."""
-    base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
+    base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1]))
     return base / 'resources' / 'shortcuts' / name
 
 

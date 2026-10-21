@@ -1,5 +1,6 @@
 """Real mapped hotkey round-trip for the feature exposed in the new subtab."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -7,7 +8,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
+from converters.shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / 'resources' / 'shortcuts'
@@ -23,11 +24,14 @@ class ShortcutRoundTripTests(unittest.TestCase):
     def test_cli_finds_relocated_template_from_another_working_directory(self):
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / 'shortcuts.json'
-            subprocess.run([sys.executable, str(ROOT / 'shortcut_converter.py'),
+            env = os.environ.copy()
+            env['PYTHONPATH'] = str(ROOT) + os.pathsep + env.get('PYTHONPATH', '')
+            subprocess.run([sys.executable, '-m', 'converters.shortcut_converter',
                             str(TEMPLATES / 'Premiere_Shortcuts_Template.kys'), str(output),
                             '--fc-template',
                             str(TEMPLATES / 'FilmCraft_Shortcuts_Template.json'),
-                            '--language', 'en'], cwd=folder, check=True, capture_output=True)
+                            '--language', 'en'], cwd=folder, env=env,
+                           check=True, capture_output=True)
             self.assertTrue(output.is_file())
             self.assertTrue((Path(folder) / 'shortcuts_shortcuts_report.md').is_file())
 

@@ -1,0 +1,3 @@
+# User projects, downloaded plug-ins and generated reports stay local.
+*
+!.gitignore

@@ -58,7 +58,7 @@ def _param_tables(text: str, font: str, size: float, fill: tuple[int, int, int] 
     try:
         from flatbuffers import Builder
     except ImportError as exc:
-        raise NativeTextUnsupported('Для нативного текста нужен flatbuffers; установите requirements.txt.') from exc
+        raise NativeTextUnsupported('Для нативного текста нужен flatbuffers; установите config/requirements.txt.') from exc
     b = Builder(512)
 
     def color_table(color):

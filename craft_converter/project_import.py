@@ -10,7 +10,7 @@ import zlib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from prproj_to_fcproj import Converter
+from converters.prproj_to_fcproj import Converter
 from .reverse_project import ReportWriteError, convert_reverse_project, reverse_report_path
 
 PR_TO_FC = 'pr_to_fc'

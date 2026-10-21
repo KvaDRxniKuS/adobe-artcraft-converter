@@ -1,0 +1,4 @@
+# Only the reviewed, checked-in example binaries belong in Git.
+*.wasm
+!/PixelSorter_EffectCraft.wasm
+!/DeepGlow_EffectCraft.wasm

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from update_converter import (
+from app.update_converter import (
     EXIT_QT_UNAVAILABLE, GitHubRedirects, REQUIRED_FILES, Revision, UpdateError,
     cached_app, choose_source,
     github_request, install_revision, main, newest_branch, unpack_source,
@@ -27,7 +27,8 @@ SHA_NEW = 'b' * 40
 def make_archive(destination: Path, *, sha=SHA_NEW, files=None):
     contents = {name: ('print("updated")\n' if name.endswith('.py') else 'data')
                 for name in REQUIRED_FILES}
-    contents['new_module.py'] = 'VALUE = 1\n'
+    contents['app/new_module.py'] = 'VALUE = 1\n'
+    contents['new_module.py'] = 'VALUE = 2\n'  # Root Python files must not be cached.
     contents['Start_Converter.bat'] = 'remote launcher'
     contents.update(files or {})
     with zipfile.ZipFile(destination, 'w') as archive:
@@ -47,7 +48,8 @@ class UpdaterTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('print("local")\n' if name.endswith('.py') else 'old',
                             encoding='utf-8')
-        (self.local / 'FilmCraftConverter.exe').write_bytes(b'local exe')
+        (self.local / 'dist').mkdir()
+        (self.local / 'dist' / 'FilmCraftConverter.exe').write_bytes(b'local exe')
         (self.local / 'Start_Converter.bat').write_text('local launcher', encoding='utf-8')
         uploads = self.local / 'uploads'
         uploads.mkdir()
@@ -98,14 +100,15 @@ class UpdaterTests(unittest.TestCase):
         selected = choose_source(self.local, self.cache,
                                  get_latest=lambda: self.revision, download=self.download)
         self.assertEqual(selected, self.cache / 'versions' / SHA_NEW)
-        self.assertEqual((selected / 'desktop_app.py').read_text(), 'print("updated")\n')
+        self.assertEqual((selected / 'app/desktop_app.py').read_text(), 'print("updated")\n')
         self.assertTrue((selected / 'craft_converter' / 'project_import.py').is_file())
         self.assertTrue((selected / 'resources/shortcuts/FilmCraft_Shortcuts_Template.json').is_file())
         self.assertTrue((selected / 'tools/export_ae_effect_metadata.jsx').is_file())
         self.assertFalse((selected / 'project_import.py').exists())
-        self.assertTrue((selected / 'new_module.py').is_file())
-        self.assertEqual((self.local / 'desktop_app.py').read_text(), 'print("local")\n')
-        self.assertEqual((self.local / 'FilmCraftConverter.exe').read_bytes(), b'local exe')
+        self.assertTrue((selected / 'app/new_module.py').is_file())
+        self.assertFalse((selected / 'new_module.py').exists())
+        self.assertEqual((self.local / 'app/desktop_app.py').read_text(), 'print("local")\n')
+        self.assertEqual((self.local / 'dist/FilmCraftConverter.exe').read_bytes(), b'local exe')
         self.assertEqual((self.local / 'Start_Converter.bat').read_text(), 'local launcher')
         self.assertFalse((selected / 'Start_Converter.bat').exists())
         self.assertEqual((self.local / 'uploads' / 'private.fcproj').read_text(), 'private project')
@@ -151,7 +154,8 @@ class UpdaterTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[1]
         archive = self.base / 'current.zip'
         with zipfile.ZipFile(archive, 'w') as package:
-            for directory in (repository, repository / 'craft_converter'):
+            for directory in (repository / 'app', repository / 'converters',
+                              repository / 'craft_converter'):
                 for path in directory.glob('*.py'):
                     package.write(path, f'root/{path.relative_to(repository).as_posix()}')
             for name in REQUIRED_FILES:
@@ -183,36 +187,43 @@ class UpdaterTests(unittest.TestCase):
             self.assertEqual((output / 'tools' / name).read_bytes(),
                              (repository / 'tools' / name).read_bytes())
         self.assertFalse((output / 'FilmCraft_Shortcuts_Template.json').exists())
-        self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))
-        self.assertIn('flatbuffers', (output / 'requirements.txt').read_text(encoding='utf-8'))
+        self.assertIn('Pillow', (output / 'config/requirements.txt').read_text(encoding='utf-8'))
+        self.assertIn('flatbuffers', (output / 'config/requirements.txt').read_text(encoding='utf-8'))
         # Import the unpacked source from outside the checkout, as the launcher
         # does when it starts a cached copy; root-only imports would fail here.
         env = os.environ.copy()
         env.pop('PYTHONPATH', None)
         subprocess.run([sys.executable, '-c',
-                        'import aex_to_effectcraft, fcproj_to_prproj, prproj_to_fcproj; '
+                        'import app.update_converter, converters.aex_to_effectcraft; '
+                        'import converters.fcproj_to_prproj, converters.prproj_to_fcproj; '
                         'import craft_converter.project_import; '
                         'from pathlib import Path; '
                         'assert Path("resources/shortcuts/Premiere_Shortcuts_Template.kys").is_file()'],
                        cwd=output, env=env, check=True, capture_output=True)
+        for module in ('app.update_converter', 'converters.aex_to_effectcraft',
+                       'converters.prproj_to_fcproj', 'converters.fcproj_to_prproj',
+                       'converters.shortcut_converter'):
+            with self.subTest(module=module):
+                subprocess.run([sys.executable, '-m', module, '--help'],
+                               cwd=output, env=env, check=True, capture_output=True)
 
     def test_archive_rejects_duplicate_and_symlink_and_bad_python(self):
         archive = self.base / 'source.zip'
-        make_archive(archive, files={'bad.py': 'def broken(\n'})
+        make_archive(archive, files={'app/bad.py': 'def broken(\n'})
         with self.assertRaises(SyntaxError):
             unpack_source(archive, self.base / 'bad')
 
         with zipfile.ZipFile(archive, 'w') as package:
             for name in REQUIRED_FILES:
                 package.writestr(f'root/{name}', 'print("ok")' if name.endswith('.py') else 'data')
-            package.writestr('root/DESKTOP_APP.PY', 'print("duplicate")')
+            package.writestr('root/app/DESKTOP_APP.PY', 'print("duplicate")')
         with self.assertRaisesRegex(UpdateError, 'duplicate'):
             unpack_source(archive, self.base / 'duplicate')
 
         with zipfile.ZipFile(archive, 'w') as package:
-            for name in REQUIRED_FILES - {'desktop_app.py'}:
+            for name in REQUIRED_FILES - {'app/desktop_app.py'}:
                 package.writestr(f'root/{name}', 'print("ok")' if name.endswith('.py') else 'data')
-            link = zipfile.ZipInfo('root/desktop_app.py')
+            link = zipfile.ZipInfo('root/app/desktop_app.py')
             link.create_system = 3
             link.external_attr = (stat.S_IFLNK | 0o777) << 16
             package.writestr(link, 'other.py')
@@ -246,20 +257,27 @@ class UpdaterTests(unittest.TestCase):
             GitHubRedirects().redirect_request(request, None, 302, 'redirect', {},
                                                 'https://example.com/source.zip')
 
+    def test_default_source_directory_is_checkout_root(self):
+        root = Path(__file__).resolve().parents[1]
+        with patch('app.update_converter.choose_source', return_value=root) as choose, \
+             patch.dict(sys.modules, {'PySide6': None, 'PySide6.QtWidgets': None}):
+            self.assertEqual(main(['--cache-dir', str(self.cache)]), EXIT_QT_UNAVAILABLE)
+        self.assertEqual(choose.call_args.args[0], root)
+
     def test_launcher_uses_selected_source_or_reports_missing_qt(self):
         argv = ['--source-dir', str(self.local), '--cache-dir', str(self.cache)]
-        with patch('update_converter.choose_source', return_value=self.local), \
+        with patch('app.update_converter.choose_source', return_value=self.local), \
              patch.dict(sys.modules, {'PySide6': None, 'PySide6.QtWidgets': None}):
             self.assertEqual(main(argv), EXIT_QT_UNAVAILABLE)
         qt = types.ModuleType('PySide6.QtWidgets')
         qt.QApplication = object
-        with patch('update_converter.choose_source', return_value=self.local), \
+        with patch('app.update_converter.choose_source', return_value=self.local), \
              patch.dict(sys.modules, {'PySide6': types.ModuleType('PySide6'),
                                       'PySide6.QtWidgets': qt}), \
-             patch('update_converter.subprocess.call', return_value=0) as launch:
+             patch('app.update_converter.subprocess.call', return_value=0) as launch:
             self.assertEqual(main(argv), 0)
             launch.assert_called_once_with(
-                [sys.executable, str(self.local / 'desktop_app.py')], cwd=self.local)
+                [sys.executable, '-m', 'app.desktop_app'], cwd=self.local)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,3 @@
+# Windows binaries are built locally, never committed.
+*
+!.gitignore
