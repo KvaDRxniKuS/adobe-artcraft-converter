@@ -170,6 +170,42 @@ class MeasuredPortTests(unittest.TestCase):
                 self.assertIn('WASM не создан', text)
                 error.exception.report.unlink()
 
+    def test_full_frame_replacement_is_allowed_if_it_is_actually_pixel_local(self):
+        # A total image change is not by itself a rejection criterion: a
+        # constant fill is representable by a LUT without reading the input.
+        colour = (180, 30, 225, 255)
+        self.render_reference(lambda image: self.Image.new('RGBA', image.size, colour))
+        fitted = fit(self.references, self.digest)
+        self.assertTrue(fitted.accepted, fitted.reason)
+        self.assertGreater(fitted.observed_change, 30)
+        self.assertEqual(fitted.mean_error, 0)
+        self.assertEqual(render_rgb(fitted.table, (12, 99, 248)), colour[:3])
+        convert_aex(self.source, self.output, reference_dir=self.references)
+        self.assertTrue(self.output.read_bytes().startswith(b'\x00asm'))
+        if shutil.which('node'):
+            subprocess.run(['node', str(ROOT / 'tests/measured_lut_wasm_smoke.cjs'),
+                            str(self.output), 'solid'], check=True, capture_output=True)
+
+    def test_spatial_generator_is_rejected_with_correct_explanation_and_next_inputs(self):
+        from PIL import ImageDraw
+
+        def location_based_image(image):
+            result = self.Image.new('RGBA', image.size, (0, 0, 0, 255))
+            pen = ImageDraw.Draw(result)
+            for x in range(result.width):
+                r = 20 + round(200 * x / max(1, result.width - 1))
+                pen.line((x, 0, x, result.height - 1), fill=(r, 8, 240 - r, 255))
+            return result
+
+        self.render_reference(location_based_image)
+        with self.assertRaises(UnsupportedAexError) as error:
+            convert_aex(self.source, self.output, reference_dir=self.references)
+        text = error.exception.report.read_text(encoding='utf-8')
+        self.assertIn('само по себе НЕ причина отказа', text)
+        self.assertIn('ОДИНАКОВЫХ размере', text)
+        self.assertIn('допуск 6', text)
+        self.assertFalse(self.output.exists())
+
     def test_refuses_scaled_or_modified_charts_and_output_collisions(self):
         self.render_reference(self.invert)
         wrong = self.Image.new('RGB', (5, 5), (20, 40, 60))

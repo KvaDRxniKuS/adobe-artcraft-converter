@@ -363,15 +363,56 @@ def failure_report(info, fitted: Fit, language: str = 'ru') -> str:
             'Большое расхождение: возможны размытие, сортировка, маски, время, '
             'соседние пиксели, HDR или другой неподдерживаемый алгоритм.',
     }
-    reason = fitted.reason if language == 'en' else (
-        translations.get(fitted.reason, fitted.reason) + f' ({fitted.reason})')
+    mismatch = bool(fitted.reason and fitted.reason.startswith('Reference mismatch:'))
+    if language == 'en':
+        detail = (
+            'A large change to the original picture is NOT why this attempt was rejected: '
+            'the LUT prediction disagrees with the independent AE render. A solid-colour '
+            'replacement could pass; a position/mask/time-dependent generator generally '
+            'cannot be represented by a colour-only LUT. Two charts of DIFFERENT sizes '
+            'cannot establish whether the effect ignores its input.\n\n'
+            'To investigate a generator, provide a minimal AE project with its core path '
+            'or mask and settings, plus before/after PNGs for TWO different backgrounds at '
+            'the SAME canvas size, preset and time. Include a changed core/path or another '
+            'time if animation matters. These references help design and validate an '
+            'independent procedural renderer; they cannot turn the DLL into WASM automatically.\n'
+        ) if mismatch else (
+            'This wizard can fit only fixed-setting, pixel-local 8-bit RGB operations; '
+            'other effects require a separately tested renderer.\n'
+        )
+        return (f'# {heading}\n\n'
+                f'- AEX SHA-256: `{info.sha256}`\n'
+                f'- {fitted.reason}\n'
+                f'- Held-out RGB MAE: {fitted.mean_error:.2f}/255 (limit {MAX_MEAN_ERROR:g}); '
+                f'p95: {fitted.p95_error}/255 (limit {MAX_P95_ERROR}); '
+                f'input-to-AE change: {fitted.observed_change:.2f}/255; '
+                f'alpha MAE: {fitted.alpha_error:.2f}/255; '
+                f'max alpha error: {fitted.max_alpha_error}/255.\n\n'
+                f'{detail}')
+    reason = translations.get(fitted.reason, fitted.reason) + f' ({fitted.reason})'
+    detail = (
+        'Большое изменение исходной картинки само по себе НЕ причина отказа: '
+        'предсказание цветовой таблицы сильно отличается от независимого рендера AE. '
+        'Сплошная заливка могла бы пройти проверку; генератор, зависящий от координат, '
+        'маски или времени, нельзя представить только таблицей цвета. Две картинки '
+        'РАЗНОГО размера не позволяют выяснить, зависит ли эффект от входа.\n\n'
+        'Для исследования генератора нужен минимальный проект AE с формой сердцевины '
+        'или маской и настройками, а также PNG до/после на ДВУХ разных фонах при '
+        'ОДИНАКОВЫХ размере композиции, настройках и времени. Если важна анимация, '
+        'добавьте другую форму/положение сердцевины или другое время. Эти примеры '
+        'помогут разработать и проверить отдельный процедурный рендерер, но сами '
+        'по себе не превращают DLL в WASM автоматически.\n'
+    ) if mismatch else (
+        'Мастер подбирает только попиксельные преобразования 8-битного RGB при '
+        'фиксированных настройках; остальные эффекты требуют отдельного проверенного рендерера.\n'
+    )
     return (f'# {heading}\n\n'
             f'- AEX SHA-256: `{info.sha256}`\n'
             f'- {reason}\n'
-            f'- Held-out RGB MAE: {fitted.mean_error:.2f}/255; '
-            f'p95: {fitted.p95_error}/255; observed change: {fitted.observed_change:.2f}/255; '
-            f'alpha error: {fitted.alpha_error:.2f}/255; '
-            f'max alpha error: {fitted.max_alpha_error}/255.\n\n'
-            'Only fixed-setting, pixel-local 8-bit RGB colour transforms can pass this wizard. '
-            'Try another plug-in or use a separate, manually tested renderer; an AE project '
-            'alone is not enough to infer a spatial/temporal algorithm.\n')
+            f'- RGB: средняя ошибка на проверке {fitted.mean_error:.2f}/255 '
+            f'(допуск {MAX_MEAN_ERROR:g}); 95-й процентиль {fitted.p95_error}/255 '
+            f'(допуск {MAX_P95_ERROR}); изменение входа в AE '
+            f'{fitted.observed_change:.2f}/255; средняя ошибка альфа '
+            f'{fitted.alpha_error:.2f}/255, максимальная '
+            f'{fitted.max_alpha_error}/255.\n\n'
+            f'{detail}')

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const file = process.argv[2];
 const effect = process.argv[3] || 'invert';
 assert.ok(file, 'pass the measured WASM file to smoke-test');
-assert.ok(['invert', 'cross-channel'].includes(effect));
+assert.ok(['invert', 'cross-channel', 'solid'].includes(effect));
 const module_ = new WebAssembly.Module(fs.readFileSync(file));
 assert.deepEqual(WebAssembly.Module.imports(module_), []);
 const e = new WebAssembly.Instance(module_, {}).exports;
@@ -35,6 +35,7 @@ function close(actual, expected) { assert.ok(Math.abs(actual - expected) <= 0.00
                                            `${actual} != ${expected}`); }
 function colour(r, g, b) {
   if (effect === 'invert') return [1 - r, 1 - g, 1 - b];
+  if (effect === 'solid') return [180 / 255, 30 / 255, 225 / 255];
   return [0.75 * r + 0.25 * g, 0.5 * r + 0.5 * b, 0.3 * g + 0.7 * b];
 }
 const expected = samples.map(([r, g, b, a]) =>
