@@ -1,0 +1,25 @@
+{
+  "api": 1,
+  "id": "org.artcraft_converter.deep_glow",
+  "name": "Deep Glow (independent port)",
+  "category": "Stylize",
+  "version": "0.1.0",
+  "author": "ArtCraft Converter contributors",
+  "description": "Independent multi-scale bloom effect. Not the AE Deep Glow algorithm or a binary translation.",
+  "params": [
+    {"id": "radius", "name": "Radius (px)", "type": "slider", "default": 48, "min": 0, "max": 256, "decimals": 0},
+    {"id": "exposure", "name": "Exposure (stops)", "type": "slider", "default": 1.5, "min": -4, "max": 5, "decimals": 1},
+    {"id": "threshold", "name": "Threshold (%)", "type": "slider", "default": 60, "min": 0, "max": 100, "decimals": 1},
+    {"id": "threshold_smooth", "name": "Threshold Smooth (%)", "type": "slider", "default": 20, "min": 0, "max": 100, "decimals": 1},
+    {"id": "spread", "name": "Spread (%)", "type": "slider", "default": 65, "min": 0, "max": 100, "decimals": 0},
+    {"id": "mix", "name": "Glow Mix (%)", "type": "slider", "default": 100, "min": 0, "max": 100, "decimals": 0},
+    {"id": "blend_mode", "name": "Blend Mode", "type": "popup", "options": ["Add", "Screen", "Glow Only"], "default": 0},
+    {"id": "tint_amount", "name": "Tint Mix (%)", "type": "slider", "default": 0, "min": 0, "max": 100, "decimals": 0},
+    {"id": "tint_red", "name": "Tint Red", "type": "slider", "default": 1, "min": 0, "max": 2, "decimals": 2},
+    {"id": "tint_green", "name": "Tint Green", "type": "slider", "default": 1, "min": 0, "max": 2, "decimals": 2},
+    {"id": "tint_blue", "name": "Tint Blue", "type": "slider", "default": 1, "min": 0, "max": 2, "decimals": 2},
+    {"id": "source_opacity", "name": "Source Opacity (%)", "type": "slider", "default": 100, "min": 0, "max": 100, "decimals": 0},
+    {"id": "expand_alpha", "name": "Expand Alpha", "type": "checkbox", "default": true},
+    {"id": "quality", "name": "Quality", "type": "popup", "options": ["Draft (2 scales)", "Normal (3 scales)", "High (4 scales)"], "default": 1}
+  ]
+}

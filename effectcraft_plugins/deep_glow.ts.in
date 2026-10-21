@@ -1,0 +1,166 @@
+// Standalone multi-scale bloom for EffectCraft plug-in API v1.
+// Independently written from common image-processing techniques, not translated
+// from Adobe/Deep Glow binary code. Compile with AssemblyScript 0.28.20.
+const MANIFEST_PTR: usize = memory.data<u8>([__MANIFEST_BYTES__]);
+const MANIFEST_LEN: i32 = __MANIFEST_LEN__;
+const HOST_BUFFER: i32 = 65536;
+const MAX_PIXELS: i32 = 9000000; // Covers 4K; scratch + input stay below 1 GiB.
+const MAX_BYTES: i32 = 900000000;
+const NPARAMS: i32 = 14;
+
+export function ec_api_version(): i32 { return 1; }
+export function ec_manifest_ptr(): i32 { return <i32>MANIFEST_PTR; }
+export function ec_manifest_len(): i32 { return MANIFEST_LEN; }
+
+export function ec_alloc(bytes: i32): i32 {
+  if (bytes <= 0 || bytes > MAX_PIXELS * 16 + 65536) return 0;
+  let end: i32 = HOST_BUFFER + bytes;
+  let pages: i32 = (end + 65535) >> 16;
+  if (pages > memory.size() && memory.grow(pages - memory.size()) < 0) return 0;
+  return HOST_BUFFER;
+}
+function growTo(end: i32): bool {
+  if (end <= 0 || end > MAX_BYTES) return false;
+  let pages: i32 = (end + 65535) >> 16;
+  return pages <= memory.size() || memory.grow(pages - memory.size()) >= 0;
+}
+function clamp(value: f64, lo: f64, hi: f64, fallback: f64): f64 {
+  if (value != value || value < -1e12 || value > 1e12) return fallback;
+  return Math.max(lo, Math.min(hi, value));
+}
+function param(ptr: i32, idx: i32, lo: f64, hi: f64, fallback: f64): f64 {
+  return clamp(load<f64>(ptr + (idx << 3)), lo, hi, fallback);
+}
+function pixelAt(start: i32, index: i32, channel: i32): i32 {
+  return start + index * 12 + (channel << 2);
+}
+function sample(start: i32, index: i32, channel: i32): f32 {
+  return load<f32>(pixelAt(start, index, channel));
+}
+function clamped(v: i32, last: i32): i32 {
+  return max<i32>(0, min<i32>(last, v));
+}
+
+// Separable sliding box blur. Edge samples are repeated. Every scale is O(pixels),
+// not O(radius * pixels), and only three RGB scratch buffers are allocated.
+function blurScale(src: i32, tmp: i32, sumBuf: i32, width: i32, height: i32,
+                   radius: i32, weight: f32): void {
+  let rx: i32 = min<i32>(radius, width - 1);
+  let ry: i32 = min<i32>(radius, height - 1);
+  let invX: f32 = 1.0 / <f32>((rx << 1) + 1);
+  let invY: f32 = 1.0 / <f32>((ry << 1) + 1);
+  for (let y: i32 = 0; y < height; y++) {
+    for (let c: i32 = 0; c < 3; c++) {
+      let row: i32 = y * width;
+      let total: f32 = 0.0;
+      for (let k: i32 = -rx; k <= rx; k++)
+        total += sample(src, row + clamped(k, width - 1), c);
+      for (let x: i32 = 0; x < width; x++) {
+        store<f32>(pixelAt(tmp, row + x, c), total * invX);
+        total += sample(src, row + clamped(x + rx + 1, width - 1), c)
+               - sample(src, row + clamped(x - rx, width - 1), c);
+      }
+    }
+  }
+  for (let x: i32 = 0; x < width; x++) {
+    for (let c: i32 = 0; c < 3; c++) {
+      let total: f32 = 0.0;
+      for (let k: i32 = -ry; k <= ry; k++)
+        total += sample(tmp, clamped(k, height - 1) * width + x, c);
+      for (let y: i32 = 0; y < height; y++) {
+        let at: i32 = pixelAt(sumBuf, y * width + x, c);
+        store<f32>(at, load<f32>(at) + total * invY * weight);
+        total += sample(tmp, clamped(y + ry + 1, height - 1) * width + x, c)
+               - sample(tmp, clamped(y - ry, height - 1) * width + x, c);
+      }
+    }
+  }
+}
+
+export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
+                          nparams: i32, time: f64, scale: f64): i32 {
+  if (nparams != NPARAMS || width <= 0 || height <= 0 || width > MAX_PIXELS / height)
+    return 1;
+  let n: i32 = width * height;
+  if (params < HOST_BUFFER || pixels < params + nparams * 8 || pixels < HOST_BUFFER
+      || pixels > MAX_BYTES - n * 52 || pixels + n * 16 > memory.size() * 65536)
+    return 2;
+  if (!growTo(pixels + n * 52)) return 3;
+  let bright: i32 = pixels + n * 16;
+  let temp: i32 = bright + n * 12;
+  let accum: i32 = temp + n * 12;
+  let radius: f64 = param(params, 0, 0.0, 256.0, 48.0);
+  let exposure: f64 = param(params, 1, -4.0, 5.0, 1.5);
+  let threshold: f32 = <f32>(param(params, 2, 0.0, 100.0, 60.0) / 100.0);
+  let smooth: f32 = <f32>(param(params, 3, 0.0, 100.0, 20.0) / 100.0);
+  let spread: f64 = param(params, 4, 0.0, 100.0, 65.0) / 100.0;
+  let mix: f32 = <f32>(param(params, 5, 0.0, 100.0, 100.0) / 100.0);
+  let mode: i32 = <i32>param(params, 6, 0.0, 2.0, 0.0);
+  let tint: f32 = <f32>(param(params, 7, 0.0, 100.0, 0.0) / 100.0);
+  let red: f32 = <f32>param(params, 8, 0.0, 2.0, 1.0);
+  let green: f32 = <f32>param(params, 9, 0.0, 2.0, 1.0);
+  let blue: f32 = <f32>param(params, 10, 0.0, 2.0, 1.0);
+  let srcOpacity: f32 = <f32>(param(params, 11, 0.0, 100.0, 100.0) / 100.0);
+  let expandAlpha: bool = param(params, 12, 0.0, 1.0, 1.0) >= 0.5;
+  let levels: i32 = <i32>param(params, 13, 0.0, 2.0, 1.0) + 2;
+  let r: i32 = <i32>Math.round(radius * clamp(scale, 0.01, 8.0, 1.0));
+  if (r > 256) r = 256;
+
+  // Extract bright areas from *straight* RGB, but keep the samples
+  // premultiplied. Fading edges can emit glow without losing alpha.
+  for (let i: i32 = 0; i < n; i++) {
+    let src: i32 = pixels + i * 16;
+    let a: f32 = load<f32>(src + 12);
+    let key: f32 = 0.0;
+    if (a > 0.000001) {
+      let ir: f32 = max<f32>(0.0, load<f32>(src) / a);
+      let ig: f32 = max<f32>(0.0, load<f32>(src + 4) / a);
+      let ib: f32 = max<f32>(0.0, load<f32>(src + 8) / a);
+      key = 0.2126 * ir + 0.7152 * ig + 0.0722 * ib;
+    }
+    let select: f32 = key >= threshold ? 1.0 : 0.0;
+    if (smooth > 0.000001) {
+      let u: f32 = max<f32>(0.0, min<f32>(1.0,
+                                       (key - threshold + smooth) / (smooth * 2.0)));
+      select = u * u * (3.0 - 2.0 * u);
+    }
+    for (let c: i32 = 0; c < 3; c++) {
+      let value: f32 = max<f32>(0.0, min<f32>(16.0, load<f32>(src + (c << 2))));
+      store<f32>(pixelAt(bright, i, c), a > 0.000001 ? value * select : 0.0);
+      store<f32>(pixelAt(accum, i, c), 0.0);
+    }
+  }
+
+  let totalWeight: f32 = 0.0;
+  for (let level: i32 = 0; level < levels; level++) {
+    let weight: f32 = level == 0 ? 1.0 : <f32>(spread * (1.0 - 0.15 * level));
+    totalWeight += weight;
+  }
+  for (let level: i32 = 0; level < levels; level++) {
+    let weight: f32 = level == 0 ? 1.0 : <f32>(spread * (1.0 - 0.15 * level));
+    // Normal, Draft and High share the same radii on common scales.
+    let divisor: i32 = 8 >> level;
+    let step: i32 = r == 0 ? 0 : max<i32>(1, <i32>Math.round(<f64>r / divisor));
+    blurScale(bright, temp, accum, width, height, step, weight / totalWeight);
+  }
+
+  let gain: f32 = <f32>Math.pow(2.0, exposure) * mix;
+  for (let i: i32 = 0; i < n; i++) {
+    let src: i32 = pixels + i * 16;
+    let glowMax: f32 = 0.0;
+    for (let c: i32 = 0; c < 3; c++) {
+      let colour: f32 = c == 0 ? red : (c == 1 ? green : blue);
+      let glow: f32 = max<f32>(0.0, sample(accum, i, c) * gain)
+                      * (1.0 - tint + tint * colour);
+      glowMax = max<f32>(glowMax, glow);
+      let base: f32 = max<f32>(0.0, load<f32>(src + (c << 2))) * srcOpacity;
+      let result: f32 = mode == 2 ? glow :
+                        (mode == 1 ? base + glow * (1.0 - min<f32>(1.0, base)) : base + glow);
+      store<f32>(src + (c << 2), result);
+    }
+    let alpha: f32 = max<f32>(0.0, min<f32>(1.0, load<f32>(src + 12) * srcOpacity));
+    if (expandAlpha) alpha = max<f32>(alpha, min<f32>(1.0, glowMax));
+    store<f32>(src + 12, alpha);
+  }
+  return 0;
+}

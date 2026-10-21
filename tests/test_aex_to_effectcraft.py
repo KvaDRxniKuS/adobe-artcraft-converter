@@ -12,11 +12,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aex_to_effectcraft import convert_aex, inspect_aex, main, output_stem
+from aex_to_effectcraft import (UnsupportedAexError, convert_aex, inspect_aex,
+                                main, output_stem)
 from effectcraft_pixel_sorter import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
+from effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, MANIFEST_SHA256 as GLOW_MANIFEST_SHA256,
+                                   WASM as GLOW_WASM, WASM_SHA256 as GLOW_SHA256)
 
 ROOT = Path(__file__).resolve().parents[1]
 REAL_AEX = Path('/tmp/arena-coding-uploads/AEPixelSorter2.aex.txt')
+REAL_GLOW = Path('/tmp/arena-coding-uploads/Deep Glow.aex.txt')
 REAL_INSTALLER = Path('/tmp/arena-coding-uploads/Setup.exe.txt')
 
 
@@ -43,6 +47,15 @@ def sample_aex() -> bytes:
     return bytes(data)
 
 
+def sample_deep_glow() -> bytes:
+    """Synthetic identity strings only; no vendor executable code or assets."""
+    data = bytearray(sample_aex())
+    labels = (b'Deep Glow 2\0Deep Glow\0Radius\0Exposure\0'
+              b'Threshold\0Threshold Smooth\0Blend Mode\0Spread\0')
+    data[0x400:0x400 + 120] = labels.ljust(120, b'\0')
+    return bytes(data)
+
+
 class AexTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -58,6 +71,8 @@ class AexTests(unittest.TestCase):
         self.assertEqual(info.size, len(sample_aex()))
         self.assertEqual(info.sha256, hashlib.sha256(sample_aex()).hexdigest())
         self.assertIn('Feather Start', info.labels)
+        self.assertEqual(info.family, 'pixel_sorter')
+        self.assertEqual(info.architecture, 'x64')
         self.assertEqual(output_stem(self.source), 'Sample')
 
     def test_converts_to_identical_embedded_wasm_with_cautionary_report(self):
@@ -70,12 +85,44 @@ class AexTests(unittest.TestCase):
         self.assertIn(self.source.name, text)
         self.assertNotIn(b'GG AEPixelSorter2\0', self.output.read_bytes())
 
-    def test_refuses_unknown_or_corrupt_pe_without_writing(self):
+    def test_deep_glow_has_distinct_working_wasm_and_report(self):
+        self.source.write_bytes(sample_deep_glow())
+        info = inspect_aex(self.source)
+        self.assertEqual(info.family, 'deep_glow')
+        self.assertIn('Radius', info.labels)
+        self.assertEqual(info.architecture, 'x64')
+        report = convert_aex(self.source, self.output, language='en')
+        self.assertEqual(self.output.read_bytes(), GLOW_WASM)
+        self.assertNotEqual(self.output.read_bytes(), WASM)
+        self.assertIn('multi-scale bloom', report.read_text(encoding='utf-8'))
+        self.assertIn('NOT the original', report.read_text(encoding='utf-8'))
+        self.assertNotIn(b'Deep Glow 2\0', self.output.read_bytes())
+
+    def test_unknown_effect_is_analyzed_without_faking_a_wasm(self):
+        for name, blob in (
+            ('unrecognized', sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2')),
+            ('different_exports', sample_aex().replace(b'EffectMain', b'InvalidExp!')),
+        ):
+            with self.subTest(name=name):
+                self.source.write_bytes(blob)
+                info = inspect_aex(self.source)
+                self.assertIsNone(info.family)
+                with self.assertRaises(UnsupportedAexError) as result:
+                    convert_aex(self.source, self.output, language='en')
+                self.assertFalse(self.output.exists())
+                report = result.exception.report
+                self.assertEqual(report.name, 'Sample_effectcraft_aex_analysis.md')
+                text = report.read_text(encoding='utf-8')
+                self.assertIn('no WASM created', text)
+                self.assertIn(info.sha256, text)
+                report.unlink()
+        self.assertEqual(main([str(self.source), '--language', 'en']), 2)
+        self.assertFalse(self.output.exists())
+
+    def test_invalid_dll_does_not_write_wasm_or_report(self):
         for name, blob in (
             ('text', b'hello'),
-            ('installer', sample_aex()[:0x84] + b'\x4c\x01' + sample_aex()[0x86:]),
-            ('bad_marker', sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2')),
-            ('no_export', sample_aex().replace(b'EffectMain', b'InvalidExp!')),
+            ('invalid_architecture', sample_aex()[:0x84] + b'\x4c\x01' + sample_aex()[0x86:]),
             ('bad_export_rva', sample_aex()[:0x108] + b'\xff\xff\xff\xff' + sample_aex()[0x10c:]),
         ):
             with self.subTest(name=name):
@@ -84,6 +131,7 @@ class AexTests(unittest.TestCase):
                     convert_aex(self.source, self.output)
                 self.assertFalse(self.output.exists())
                 self.assertFalse(self.base.joinpath('Sample_effectcraft_conversion_report.md').exists())
+                self.assertFalse(self.base.joinpath('Sample_effectcraft_aex_analysis.md').exists())
         self.source.write_bytes(sample_aex())
 
     def test_never_overwrites_input_output_or_existing_report(self):
@@ -104,6 +152,32 @@ class AexTests(unittest.TestCase):
         self.assertEqual(renamed_input.read_bytes(), sample_aex())
         with self.assertRaises(ValueError):
             convert_aex(self.source, self.base / 'wrong.txt')
+
+    def test_unknown_does_not_overwrite_existing_analysis_or_output(self):
+        self.source.write_bytes(sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2'))
+        report = self.output.with_name(self.output.stem + '_aex_analysis.md')
+        for existing in (self.output, report):
+            with self.subTest(existing=existing):
+                existing.write_text('keep existing', encoding='utf-8')
+                with self.assertRaises(FileExistsError):
+                    convert_aex(self.source, self.output)
+                self.assertEqual(existing.read_text(encoding='utf-8'), 'keep existing')
+                existing.unlink()
+        self.assertFalse(self.output.exists())
+
+    def test_x86_dll_can_be_inspected_without_artificial_x64_restriction(self):
+        blob = bytearray(sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2'))
+        struct.pack_into('<H', blob, 0x84, 0x14c)  # Intel x86 machine
+        struct.pack_into('<H', blob, 0x98, 0x10b)  # PE32 optional header
+        struct.pack_into('<II', blob, 0x98 + 96, 0x1000, 0x80)
+        struct.pack_into('<II', blob, 0x98 + 112, 0, 0)
+        self.source.write_bytes(blob)
+        info = inspect_aex(self.source)
+        self.assertEqual(info.architecture, 'x86')
+        self.assertIsNone(info.family)
+        with self.assertRaises(UnsupportedAexError):
+            convert_aex(self.source, self.output)
+        self.assertFalse(self.output.exists())
 
     def test_cli_default_output_and_report(self):
         self.assertEqual(main([str(self.source), '--language', 'en']), 0)
@@ -179,7 +253,7 @@ class AexTests(unittest.TestCase):
 
     @unittest.skipUnless(REAL_INSTALLER.is_file(), 'Installer only available in the Arena session')
     def test_installer_is_rejected_without_running_it(self):
-        with self.assertRaisesRegex(ValueError, '64-битный'):
+        with self.assertRaisesRegex(ValueError, 'установщик'):
             inspect_aex(REAL_INSTALLER)  # Static read only; never use subprocess on it.
 
     @unittest.skipUnless(REAL_AEX.is_file(), 'User-supplied .aex only available in the Arena session')

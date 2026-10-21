@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 from project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
 from reverse_project import ReportWriteError
 from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
-from aex_to_effectcraft import convert_aex, output_stem
+from aex_to_effectcraft import UnsupportedAexError, convert_aex, inspect_aex, output_stem
 
 APP_NAME='Adobe Craft Converter'
 
@@ -73,15 +73,19 @@ TEXT = {
         'templates_needed_title':'Недоступна оболочка Premiere','templates_needed':'Эти проекты пропущены:\n{details}\n\nУдалите путь или выберите существующую оболочку. Остальные проекты будут обработаны.',
         'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — откройте вкладку «Горячие клавиши»','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
         'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
-        'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
-        'plugin_note':'Только распознанный AE Pixel Sorter 2. Создаётся самостоятельный рабочий WASM-эффект сортировки пикселей, а не копия/перевод закрытого .aex. Установщик не нужен. Визуальное совпадение с AE не гарантировано.',
-        'plugin_input':'Исходный файл AE Pixel Sorter 2 .aex', 'plugin_output':'Новый файл плагина .wasm',
-        'plugin_choose':'Выберите AE Pixel Sorter 2 .aex',
+        'plugin_heading':'Плагины AE → EffectCraft',
+        'plugin_note':'Проверяйте любой .aex. Для Pixel Sorter 2 и Deep Glow создаются самостоятельные работающие WASM-эффекты; для остальных — диагностический отчёт без подмены плагина. Исходный DLL не запускается; совпадение с AE не гарантировано.',
+        'plugin_input':'Исходный плагин After Effects .aex', 'plugin_output':'Новый файл эффекта .wasm',
+        'plugin_choose':'Выберите плагин After Effects .aex',
         'plugin_filter':'Плагины Adobe (*.aex *.aex.txt);;Все файлы (*)',
         'plugin_save':'Сохранить независимый плагин EffectCraft',
         'plugin_save_filter':'Плагин EffectCraft (*.wasm)',
-        'plugin_missing':'Выберите существующий файл AE Pixel Sorter 2 .aex.',
-        'plugin_summary':'WASM с 18 параметрами. Это независимая реализация, а не оригинал; подробности и ограничения в отчёте.',
+        'plugin_missing':'Выберите существующий .aex-файл After Effects.',
+        'plugin_convert':'Проверить / создать WASM',
+        'plugin_pixel_summary':'Независимый Pixel Sorter с 18 параметрами; ограничения в отчёте.',
+        'plugin_glow_summary':'Независимый многомасштабный Glow с 14 параметрами; ограничения в отчёте.',
+        'plugin_analyzed':'Анализ завершён · WASM не создан',
+        'plugin_no_port':'Этот .aex изучен, но для его эффекта пока нет самостоятельной реализации. WASM не создавался.\nДиагностика: {report}',
     },
     'en': {
         'window_title':'Adobe ↔ Craft Converter','header_title':'Adobe  ↔  Craft',
@@ -135,15 +139,19 @@ TEXT = {
         'templates_needed_title':'Premiere shell unavailable','templates_needed':'These projects were skipped:\n{details}\n\nClear the path or select an existing empty shell. Other projects will continue.',
         'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the Hotkeys tab','invalid_missing':'file not found','invalid_more':'…and {n} more',
         'report_write_failed':'Project created, but the report could not be saved: {error}',
-        'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
-        'plugin_note':'Recognized AE Pixel Sorter 2 only. Generates a working, independently written pixel-sorting WASM effect, not a copy or translation of the closed-source .aex. No installer required. AE visual parity is not guaranteed.',
-        'plugin_input':'Input AE Pixel Sorter 2 .aex', 'plugin_output':'New .wasm effect file',
-        'plugin_choose':'Choose AE Pixel Sorter 2 .aex',
+        'plugin_heading':'AE plug-ins → EffectCraft',
+        'plugin_note':'Analyze any .aex. Pixel Sorter 2 and Deep Glow have independent, working WASM ports; other effects get diagnostics, never a substituted plug-in. The DLL is not run; AE visual parity is unverified.',
+        'plugin_input':'After Effects .aex plug-in file', 'plugin_output':'New .wasm effect file',
+        'plugin_choose':'Choose an After Effects .aex plug-in',
         'plugin_filter':'Adobe plug-ins (*.aex *.aex.txt);;All files (*)',
         'plugin_save':'Save independent EffectCraft plug-in',
         'plugin_save_filter':'EffectCraft plug-in (*.wasm)',
-        'plugin_missing':'Choose an existing AE Pixel Sorter 2 .aex file.',
-        'plugin_summary':'WASM effect with 18 controls. This is an independent implementation; see the report for its limitations.',
+        'plugin_missing':'Choose an existing After Effects .aex file.',
+        'plugin_convert':'Analyze / export WASM',
+        'plugin_pixel_summary':'Independent Pixel Sorter with 18 controls; see report for limitations.',
+        'plugin_glow_summary':'Independent multi-scale Glow with 14 controls; see report for limitations.',
+        'plugin_analyzed':'Analysis complete · no WASM created',
+        'plugin_no_port':'This .aex was analyzed, but its effect has no independent implementation yet. No WASM was created.\nDiagnostics: {report}',
     }
 }
 
@@ -175,9 +183,11 @@ class FeaturePage(QScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName('featurePage')
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
         content = QWidget()
+        content.setObjectName('featureContent')
         self.root = QVBoxLayout(content)
         self.root.setContentsMargins(18, 18, 18, 18)
         self.root.setSpacing(12)
@@ -208,6 +218,8 @@ class FeaturePage(QScrollArea):
     def _section(self):
         panel = QFrame()
         panel.setObjectName('panel')
+        panel.setFrameShape(QFrame.StyledPanel)
+        panel.setAttribute(Qt.WA_StyledBackground, True)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(8)
@@ -357,7 +369,7 @@ class ShortcutConverterPanel(FileConverterPanel):
 
 
 class AexConverterPanel(FileConverterPanel):
-    """Independent AE Pixel Sorter port, embedded in After Effects plug-ins tab."""
+    """AE plug-in inspection and independent effect ports, inline in its subtab."""
 
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent, language)
@@ -373,7 +385,7 @@ class AexConverterPanel(FileConverterPanel):
         self.input_btn.setText(tr(self.language, 'shortcut_file'))
         self.output_edit.setPlaceholderText(tr(self.language, 'plugin_output'))
         self.output_btn.setText(tr(self.language, 'save_as'))
-        self.run_btn.setText(tr(self.language, 'convert'))
+        self.run_btn.setText(tr(self.language, 'plugin_convert'))
 
     def choose_input(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -389,7 +401,8 @@ class AexConverterPanel(FileConverterPanel):
             suffix = '' if n == 1 else f'_{n}'
             output = source.with_name(stem + suffix + '.wasm')
             report = output.with_name(output.stem + '_conversion_report.md')
-            if not output.exists() and not report.exists():
+            analysis = output.with_name(output.stem + '_aex_analysis.md')
+            if not output.exists() and not report.exists() and not analysis.exists():
                 break
             n += 1
         self.output_edit.setText(str(output))
@@ -417,12 +430,18 @@ class AexConverterPanel(FileConverterPanel):
             return
         output = Path(raw_output)
         try:
+            family = inspect_aex(source).family
             report = convert_aex(source, output, language=self.language)
             self.set_status('done', name=output.name)
+            summary_key = 'plugin_glow_summary' if family == 'deep_glow' else 'plugin_pixel_summary'
             QMessageBox.information(
                 self, tr(self.language, 'conversion_done'),
                 tr(self.language, 'file_created', path=output,
-                   summary=tr(self.language, 'plugin_summary'), report=report))
+                   summary=tr(self.language, summary_key), report=report))
+        except UnsupportedAexError as exc:
+            self.set_status('plugin_analyzed')
+            QMessageBox.warning(self, tr(self.language, 'plugin_analyzed'),
+                                tr(self.language, 'plugin_no_port', report=exc.report))
         except Exception as exc:
             self.set_status('state_error')
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
@@ -772,8 +791,12 @@ class MainWindow(QMainWindow):
         self.status_label.setText(self.t(key, **values))
 
     def apply_theme(self):
-        self.setStyleSheet('''
+        # Apply globally so scroll-area content and widgets in every nested tab
+        # receive the same style, regardless of which tab is currently shown.
+        QApplication.instance().setStyleSheet('''
             QWidget{background:#0d1118;color:#edf2f7;font-family:"Segoe UI",Arial,sans-serif;font-size:13px}
+            QLabel{background:transparent}
+            QScrollArea#featurePage,QWidget#featureContent{background:#111720;border:0}
             QLabel#title{font-size:24px;font-weight:750;letter-spacing:-.4px;color:#f5f7fa}
             QLabel#formTitle{font-size:20px;font-weight:750;color:#f5f7fa}
             QLabel#muted,QLabel#footnote{color:#9aa6b5;font-size:12px}
@@ -787,7 +810,7 @@ class MainWindow(QMainWindow):
             QFrame#dropArea[dragging="true"]{background:#142920;border-color:#72e1bd}
             QLabel#dropIcon{font-size:27px;color:#74e3bf;background:#1d342e;border-radius:17px;min-width:48px;max-width:48px;min-height:46px;max-height:46px}
             QLabel#dropTitle{font-size:16px;font-weight:700;color:#f0f5f8}
-            QFrame#panel{background:#141a23;border:1px solid #2b3442;border-radius:13px}
+            QFrame#panel{background:#19232e;border:1px solid #415265;border-radius:13px}
             QLineEdit{background:#0a0e14;border:1px solid #343f4e;border-radius:8px;padding:10px 11px;color:#e9eef4;selection-background-color:#3a8f78}
             QLineEdit:focus{border-color:#69d5b4}
             QPushButton{background:#1b232e;border:1px solid #394555;border-radius:9px;padding:9px 13px;color:#e2e8ef;font-weight:650}

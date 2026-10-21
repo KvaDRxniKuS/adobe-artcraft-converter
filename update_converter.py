@@ -32,7 +32,8 @@ REQUIRED_FILES = frozenset({
     'desktop_app.py', 'prproj_to_fcproj.py', 'fcproj_to_prproj.py',
     'direct_fc_to_prproj.py', 'project_import.py', 'reverse_project.py',
     'graphic_raster.py', 'premiere_seed.py', 'premiere_text.py', 'premiere_text_seed.py',
-    'shortcut_converter.py', 'requirements.txt',
+    'shortcut_converter.py', 'aex_to_effectcraft.py',
+    'effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py', 'requirements.txt',
     'FilmCraft_Shortcuts_Template.json', 'Premiere_Shortcuts_Template.kys',
 })
 EXTRA_FILES = frozenset({'requirements.txt', 'FilmCraft_Shortcuts_Template.json',

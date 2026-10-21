@@ -160,6 +160,8 @@ class UpdaterTests(unittest.TestCase):
         # without shipping the AssemblyScript toolchain or any .aex inputs.
         self.assertEqual((output / 'effectcraft_pixel_sorter.py').read_bytes(),
                          (repository / 'effectcraft_pixel_sorter.py').read_bytes())
+        self.assertEqual((output / 'effectcraft_deep_glow.py').read_bytes(),
+                         (repository / 'effectcraft_deep_glow.py').read_bytes())
         self.assertTrue((output / 'aex_to_effectcraft.py').is_file())
         self.assertFalse((output / 'effectcraft_plugins').exists())
         self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))

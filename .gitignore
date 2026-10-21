@@ -3,10 +3,12 @@
 *.fcproj
 *.prproj
 *_conversion_report.md
+*_aex_analysis.md
 *_shortcuts_report.md
-# Generated effect binaries are local except the small, ready-to-load sample.
+# Generated effect binaries are local except the small, ready-to-load examples.
 *.wasm
 !/effectcraft_plugins/PixelSorter_EffectCraft.wasm
+!/effectcraft_plugins/DeepGlow_EffectCraft.wasm
 
 # Python and Windows build artifacts
 __pycache__/

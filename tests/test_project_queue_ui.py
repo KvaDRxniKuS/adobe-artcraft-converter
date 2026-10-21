@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 try:
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication, QMessageBox, QFrame
     import desktop_app
 except (ImportError, OSError) as exc:
     desktop_app = None
@@ -19,7 +19,8 @@ else:
 
 from project_import import FC_TO_PR, PR_TO_FC
 from test_reverse_writer import REFERENCE, SHELL
-from test_aex_to_effectcraft import sample_aex
+from test_aex_to_effectcraft import sample_aex, sample_deep_glow
+from effectcraft_deep_glow import WASM as GLOW_WASM
 
 
 @unittest.skipUnless(desktop_app is not None, f'PySide6 GUI unavailable: {QT_ERROR}')
@@ -81,10 +82,16 @@ class MixedQueueUITests(unittest.TestCase):
                               self.window.photoshop_tabs)
                  for index in range(3)]
         self.assertEqual(len(pages), 9)
+        # The stylesheet belongs to QApplication, not only the first QMainWindow:
+        # every nested QScrollArea and its cards must be styled on Windows too.
+        self.assertIn('QFrame#panel', self.app.styleSheet())
+        self.assertIn('QWidget#featureContent', self.app.styleSheet())
         for page in pages:
             with self.subTest(page=page.__class__.__name__):
                 self.assertIsInstance(page, desktop_app.FeaturePage)
                 self.assertTrue(page.widgetResizable())
+                self.assertEqual(page.objectName(), 'featurePage')
+                self.assertEqual(page.widget().objectName(), 'featureContent')
                 self.assertIs(page.root.itemAt(0).widget(), page.title_label)
                 self.assertIs(page.root.itemAt(1).widget(), page.note_label)
                 self.assertIs(page.root.itemAt(2).widget(), page.source_panel)
@@ -98,6 +105,7 @@ class MixedQueueUITests(unittest.TestCase):
                                   margins.right(), margins.bottom()), (18, 18, 18, 18))
                 for card in (page.source_panel, page.target_panel):
                     self.assertEqual(card.objectName(), 'panel')
+                    self.assertEqual(card.frameShape(), QFrame.StyledPanel)
                     card_margins = card.layout().contentsMargins()
                     self.assertEqual((card_margins.left(), card_margins.top(),
                                       card_margins.right(), card_margins.bottom()),
@@ -186,6 +194,39 @@ class MixedQueueUITests(unittest.TestCase):
         with patch.object(QMessageBox, 'critical') as error:
             panel.convert()
             error.assert_called_once()  # Never overwrite the existing WASM/report.
+
+    def test_plugins_tab_exports_deep_glow_and_analyzes_other_aex_without_fake_wasm(self):
+        panel = self.window.plugin_panel
+        source = self.source.with_name('Deep Glow.aex.txt')
+        source.write_bytes(sample_deep_glow())
+        output = self.source.with_name('DeepGlow_effectcraft.wasm')
+        panel.input_edit.setText(str(source))
+        panel.output_edit.setText(str(output))
+        with patch.object(QMessageBox, 'information') as info, \
+             patch.object(QMessageBox, 'critical') as error:
+            panel.convert()
+            error.assert_not_called()
+            info.assert_called_once()
+        self.assertEqual(output.read_bytes(), GLOW_WASM)
+        self.assertIn('Glow', info.call_args.args[2])
+        self.assertTrue(output.with_name(output.stem + '_conversion_report.md').is_file())
+
+        # A valid but unrelated DLL is accepted for analysis, not mislabelled
+        # as either supported effect. A warning includes the diagnostic report.
+        source.write_bytes(sample_aex().replace(b'GG AEPixelSorter2', b'ZZ AEPixelSorter2'))
+        unknown = self.source.with_name('other_effect.wasm')
+        panel.output_edit.setText(str(unknown))
+        with patch.object(QMessageBox, 'warning') as warning, \
+             patch.object(QMessageBox, 'information') as info, \
+             patch.object(QMessageBox, 'critical') as error:
+            panel.convert()
+            warning.assert_called_once()
+            info.assert_not_called()
+            error.assert_not_called()
+        self.assertIn('aex_analysis.md', warning.call_args.args[2])
+        self.assertFalse(unknown.exists())
+        self.assertTrue(unknown.with_name(unknown.stem + '_aex_analysis.md').is_file())
+        self.assertEqual(self.window.files, [])
 
     def test_hotkeys_tab_converts_kys_and_json_without_extra_window(self):
         from PySide6.QtWidgets import QFileDialog
