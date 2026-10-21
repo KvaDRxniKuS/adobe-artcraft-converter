@@ -511,6 +511,21 @@ class AexTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn('PASS', completed.stdout)
 
+    @unittest.skipUnless(shutil.which('node'), 'Node.js needed for JSX host simulation')
+    def test_local_ae_observation_needs_no_original_project_and_preserves_user_work(self):
+        from craft_converter.ae_profile import load_ae_profile
+        profile_file = self.base / 'ae_probe_profile.json'
+        completed = subprocess.run(['node', str(ROOT / 'tests/ae_observation_script_smoke.cjs'),
+                                    str(profile_file)],
+                                   cwd=ROOT, capture_output=True, text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn('PASS', completed.stdout)
+        profile = load_ae_profile(profile_file, ())
+        self.assertEqual(profile.effect_match_name, 'org.vendor.beam')
+        self.assertEqual(len(profile.properties), 3)
+        self.assertEqual(profile.properties[0].min_value, 0)
+        self.assertEqual(profile.properties[2].value_type, 'custom')
+
     @unittest.skipUnless(shutil.which('node'), 'Node.js needed for simulated host tests')
     def test_ae_settings_and_effectcraft_bounds_scripts_in_host_mocks(self):
         for name in ('ae_values_script_smoke.cjs', 'deep_glow_bounds_script_smoke.cjs'):

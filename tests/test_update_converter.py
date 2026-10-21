@@ -185,8 +185,10 @@ class UpdaterTests(unittest.TestCase):
                              (repository / 'craft_converter' / name).read_bytes())
         self.assertFalse((output / 'effectcraft_plugins').exists())
         self.assertEqual(sorted(p.name for p in (output / 'tools').iterdir()),
-                         ['export_ae_deep_glow_values.jsx', 'export_ae_effect_metadata.jsx'])
-        for name in ('export_ae_effect_metadata.jsx', 'export_ae_deep_glow_values.jsx'):
+                         ['collect_ae_effect_observations.jsx',
+                          'export_ae_deep_glow_values.jsx', 'export_ae_effect_metadata.jsx'])
+        for name in ('collect_ae_effect_observations.jsx', 'export_ae_effect_metadata.jsx',
+                     'export_ae_deep_glow_values.jsx'):
             self.assertEqual((output / 'tools' / name).read_bytes(),
                              (repository / 'tools' / name).read_bytes())
         self.assertFalse((output / 'FilmCraft_Shortcuts_Template.json').exists())

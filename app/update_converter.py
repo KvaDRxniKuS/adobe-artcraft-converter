@@ -57,10 +57,10 @@ SHORTCUT_TEMPLATES = frozenset({
     'resources/shortcuts/FilmCraft_Shortcuts_Template.json',
     'resources/shortcuts/Premiere_Shortcuts_Template.kys',
 })
-# AE-host metadata and opt-in numeric snapshot scripts. Do not download build
-# tools or arbitrary files from the tools directory.
+# Allowlisted, local AE-host observation scripts. No arbitrary files from tools/.
 AE_HOST_SCRIPTS = frozenset({'tools/export_ae_effect_metadata.jsx',
-                             'tools/export_ae_deep_glow_values.jsx'})
+                             'tools/export_ae_deep_glow_values.jsx',
+                             'tools/collect_ae_effect_observations.jsx'})
 REQUIRED_FILES = (APP_MODULES | CONVERTER_MODULES | CORE_MODULES |
                   SHORTCUT_TEMPLATES | AE_HOST_SCRIPTS | {'config/requirements.txt'})
 MAX_BRANCHES = 40  # Unauthenticated GitHub API calls are limited to 60 per hour.
