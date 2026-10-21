@@ -28,6 +28,14 @@ TEXT = {
         'planned_suffix':' · скоро','planned_title':'Пока не реализовано',
         'planned_note':'Конвертация «{feature}» для {pair} пока не реализована. Здесь появится инструмент, когда он будет готов; файлы не изменяются.',
         'planned_tooltip':'Пока не реализовано: {feature} · {pair}',
+        'source_data':'ИСХОДНЫЕ ДАННЫЕ','target_data':'РЕЗУЛЬТАТ',
+        'planned_source':'Для этого типа данных конвертер пока недоступен.',
+        'planned_target':'Файлы результата не создаются.',
+        'project_heading':'Проекты · Premiere ↔ FilmCraft',
+        'project_note':'Добавляйте проекты в общую очередь: направление определяется автоматически. Для FC → PR дополнительные параметры доступны при выборе проекта.',
+        'source_projects':'ИСХОДНЫЕ ПРОЕКТЫ',
+        'source_shortcuts':'ИСХОДНЫЙ ПРОФИЛЬ','target_shortcuts':'ФАЙЛ РЕЗУЛЬТАТА',
+        'source_plugin':'ИСХОДНЫЙ ПЛАГИН','target_plugin':'WASM-ЭФФЕКТ',
         'language':'Язык / Language','local_app':'ЛОКАЛЬНОЕ ПРИЛОЖЕНИЕ','drop_title':'Перетащите .prproj или .fcproj сюда',
         'drop_note':'Направление определяется по содержимому файла · можно добавить несколько проектов','add':'＋  Добавить проекты',
         'remove':'Удалить выбранные','clear':'Очистить очередь','output_folder':'ПАПКА ВЫВОДА','configurable':'настраивается',
@@ -82,6 +90,14 @@ TEXT = {
         'planned_suffix':' · planned','planned_title':'Not implemented yet',
         'planned_note':'Conversion of {feature} for {pair} is not implemented yet. A tool will appear here when support is added; no files are changed.',
         'planned_tooltip':'Not implemented yet: {feature} · {pair}',
+        'source_data':'SOURCE DATA','target_data':'RESULT',
+        'planned_source':'Conversion for this data type is not available yet.',
+        'planned_target':'No output files are created.',
+        'project_heading':'Projects · Premiere ↔ FilmCraft',
+        'project_note':'Add projects to one queue: direction is detected automatically. Select an FC project to set optional FC → PR parameters.',
+        'source_projects':'SOURCE PROJECTS',
+        'source_shortcuts':'SOURCE SHORTCUTS','target_shortcuts':'OUTPUT FILE',
+        'source_plugin':'SOURCE PLUG-IN','target_plugin':'WASM EFFECT',
         'language':'Language / Язык','local_app':'LOCAL DESKTOP APP','drop_title':'Drop .prproj or .fcproj files here',
         'drop_note':'Direction is detected from file content · add multiple projects','add':'＋  Add projects',
         'remove':'Remove selected','clear':'Clear queue','output_folder':'OUTPUT FOLDER','configurable':'configurable',
@@ -150,49 +166,115 @@ def resource_path(name: str) -> Path:
     return base/name
 
 
-class ShortcutConverterPanel(QWidget):
-    """Premiere ↔ FilmCraft shortcut conversion, embedded in its own subtab."""
+class FeaturePage(QScrollArea):
+    """Shared structure for every project, hotkey, plug-in and planned subtab.
+
+    Each page has the same scrollable header, source/target cards, details area,
+    action row and optional footnote. Only the contents of those slots vary.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        self.root = QVBoxLayout(content)
+        self.root.setContentsMargins(18, 18, 18, 18)
+        self.root.setSpacing(12)
+        self.title_label = QLabel()
+        self.title_label.setObjectName('formTitle')
+        self.root.addWidget(self.title_label)
+        self.note_label = QLabel()
+        self.note_label.setObjectName('muted')
+        self.note_label.setWordWrap(True)
+        self.root.addWidget(self.note_label)
+        (self.source_panel, self.source_title, self.source_meta,
+         self.source_layout) = self._section()
+        (self.target_panel, self.target_title, self.target_meta,
+         self.target_layout) = self._section()
+        self.details_layout = QVBoxLayout()
+        self.details_layout.setSpacing(12)
+        self.root.addLayout(self.details_layout, 1)
+        self.footer_layout = QHBoxLayout()
+        self.footer_layout.setSpacing(10)
+        self.root.addLayout(self.footer_layout)
+        self.footnote_label = QLabel()
+        self.footnote_label.setObjectName('footnote')
+        self.footnote_label.setWordWrap(True)
+        self.footnote_label.hide()
+        self.root.addWidget(self.footnote_label)
+        self.setWidget(content)
+
+    def _section(self):
+        panel = QFrame()
+        panel.setObjectName('panel')
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+        header = QHBoxLayout()
+        title = QLabel()
+        title.setObjectName('section')
+        meta = QLabel()
+        meta.setObjectName('muted')
+        meta.hide()
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(meta)
+        layout.addLayout(header)
+        contents = QVBoxLayout()
+        contents.setSpacing(8)
+        layout.addLayout(contents)
+        self.root.addWidget(panel)
+        return panel, title, meta, contents
+
+    @staticmethod
+    def file_row(layout):
+        row = QHBoxLayout()
+        edit = QLineEdit()
+        button = QPushButton()
+        row.addWidget(edit, 1)
+        row.addWidget(button)
+        layout.addLayout(row)
+        return edit, button
+
+
+class FileConverterPanel(FeaturePage):
+    """Common input/output rows and action/status footer for file converters."""
 
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent)
         self.language = language
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 22, 22, 22)
-        root.setSpacing(14)
-        self.title_label = QLabel()
-        self.title_label.setObjectName('formTitle')
-        root.addWidget(self.title_label)
-        self.note_label = QLabel()
-        self.note_label.setObjectName('muted')
-        self.note_label.setWordWrap(True)
-        root.addWidget(self.note_label)
-        row = QHBoxLayout()
-        self.input_edit = QLineEdit()
-        self.input_btn = QPushButton()
+        self.input_edit, self.input_btn = self.file_row(self.source_layout)
         self.input_btn.clicked.connect(self.choose_input)
-        row.addWidget(self.input_edit, 1)
-        row.addWidget(self.input_btn)
-        root.addLayout(row)
-        row = QHBoxLayout()
-        self.output_edit = QLineEdit()
-        self.output_btn = QPushButton()
+        self.output_edit, self.output_btn = self.file_row(self.target_layout)
         self.output_btn.clicked.connect(self.choose_output)
-        row.addWidget(self.output_edit, 1)
-        row.addWidget(self.output_btn)
-        root.addLayout(row)
-        footer = QHBoxLayout()
-        footer.addStretch()
+        self.status_label = QLabel()
+        self.status_label.setObjectName('status')
+        self.footer_layout.addWidget(self.status_label, 1)
         self.run_btn = QPushButton()
         self.run_btn.setObjectName('primary')
         self.run_btn.clicked.connect(self.convert)
-        footer.addWidget(self.run_btn)
-        root.addLayout(footer)
-        root.addStretch(1)
+        self.footer_layout.addWidget(self.run_btn)
+        self.last_status = ('ready', {})
+
+    def set_status(self, key, **values):
+        self.last_status = (key, values)
+        self.status_label.setText(tr(self.language, key, **values))
+
+
+class ShortcutConverterPanel(FileConverterPanel):
+    """Premiere ↔ FilmCraft shortcut conversion, embedded in its own subtab."""
+
+    def __init__(self, parent=None, language='ru'):
+        super().__init__(parent, language)
         self.retranslate()
 
     def retranslate(self):
         self.title_label.setText(tr(self.language, 'shortcut_heading'))
         self.note_label.setText(tr(self.language, 'shortcut_note'))
+        self.source_title.setText(tr(self.language, 'source_shortcuts'))
+        self.target_title.setText(tr(self.language, 'target_shortcuts'))
+        self.status_label.setText(tr(self.language, self.last_status[0], **self.last_status[1]))
         self.input_edit.setPlaceholderText(tr(self.language, 'shortcut_input_placeholder'))
         self.input_btn.setText(tr(self.language, 'shortcut_file'))
         self.output_edit.setPlaceholderText(tr(self.language, 'shortcut_output_placeholder'))
@@ -234,10 +316,12 @@ class ShortcutConverterPanel(QWidget):
         raw_output = self.output_edit.text().strip()
         source = Path(self.input_edit.text().strip())
         if not source.is_file():
+            self.set_status('state_error')
             QMessageBox.warning(self, tr(self.language, 'no_source_title'),
                                 tr(self.language, 'no_source'))
             return
         if not raw_output:
+            self.set_status('state_error')
             QMessageBox.warning(self, tr(self.language, 'no_output_title'),
                                 tr(self.language, 'no_output'))
             return
@@ -261,58 +345,30 @@ class ShortcutConverterPanel(QWidget):
                 f'- {tr(self.language, "report_output")}: `{output.name}`\n\n'
                 f'## {tr(self.language, "report_result")}\n\n'
                 + '\n'.join('- ' + x for x in warnings) + '\n', encoding='utf-8')
+            self.set_status('done', name=output.name)
             QMessageBox.information(
                 self, tr(self.language, 'conversion_done'),
                 tr(self.language, 'file_created', path=output,
                    summary=warnings[0] if warnings else tr(self.language, 'shortcut_summary_default'),
                    report=report.name))
         except Exception as exc:
+            self.set_status('state_error')
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
 
 
-class AexConverterPanel(QWidget):
+class AexConverterPanel(FileConverterPanel):
     """Independent AE Pixel Sorter port, embedded in After Effects plug-ins tab."""
 
     def __init__(self, parent=None, language='ru'):
-        super().__init__(parent)
-        self.language = language
-        root = QVBoxLayout(self)
-        root.setContentsMargins(22, 22, 22, 22)
-        root.setSpacing(14)
-        self.title_label = QLabel()
-        self.title_label.setObjectName('formTitle')
-        root.addWidget(self.title_label)
-        self.note_label = QLabel()
-        self.note_label.setObjectName('muted')
-        self.note_label.setWordWrap(True)
-        root.addWidget(self.note_label)
-        row = QHBoxLayout()
-        self.input_edit = QLineEdit()
-        self.input_btn = QPushButton()
-        self.input_btn.clicked.connect(self.choose_input)
-        row.addWidget(self.input_edit, 1)
-        row.addWidget(self.input_btn)
-        root.addLayout(row)
-        row = QHBoxLayout()
-        self.output_edit = QLineEdit()
-        self.output_btn = QPushButton()
-        self.output_btn.clicked.connect(self.choose_output)
-        row.addWidget(self.output_edit, 1)
-        row.addWidget(self.output_btn)
-        root.addLayout(row)
-        footer = QHBoxLayout()
-        footer.addStretch()
-        self.run_btn = QPushButton()
-        self.run_btn.setObjectName('primary')
-        self.run_btn.clicked.connect(self.convert)
-        footer.addWidget(self.run_btn)
-        root.addLayout(footer)
-        root.addStretch(1)
+        super().__init__(parent, language)
         self.retranslate()
 
     def retranslate(self):
         self.title_label.setText(tr(self.language, 'plugin_heading'))
         self.note_label.setText(tr(self.language, 'plugin_note'))
+        self.source_title.setText(tr(self.language, 'source_plugin'))
+        self.target_title.setText(tr(self.language, 'target_plugin'))
+        self.status_label.setText(tr(self.language, self.last_status[0], **self.last_status[1]))
         self.input_edit.setPlaceholderText(tr(self.language, 'plugin_input'))
         self.input_btn.setText(tr(self.language, 'shortcut_file'))
         self.output_edit.setPlaceholderText(tr(self.language, 'plugin_output'))
@@ -349,54 +405,58 @@ class AexConverterPanel(QWidget):
     def convert(self):
         source = Path(self.input_edit.text().strip())
         if not source.is_file():
+            self.set_status('state_error')
             QMessageBox.warning(self, tr(self.language, 'no_source_title'),
                                 tr(self.language, 'plugin_missing'))
             return
         raw_output = self.output_edit.text().strip()
         if not raw_output:
+            self.set_status('state_error')
             QMessageBox.warning(self, tr(self.language, 'no_output_title'),
                                 tr(self.language, 'no_output'))
             return
         output = Path(raw_output)
         try:
             report = convert_aex(source, output, language=self.language)
+            self.set_status('done', name=output.name)
             QMessageBox.information(
                 self, tr(self.language, 'conversion_done'),
                 tr(self.language, 'file_created', path=output,
                    summary=tr(self.language, 'plugin_summary'), report=report))
         except Exception as exc:
+            self.set_status('state_error')
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
 
 
-class PlannedFeature(QWidget):
-    """Clearly labeled, non-converting placeholder for an unsupported pair/type."""
+class PlannedFeature(FeaturePage):
+    """Non-converting placeholder with the same page structure as live tabs."""
 
     def __init__(self, program: str, feature: str, language: str):
         super().__init__()
         self.program = program
         self.feature = feature
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 22, 22, 22)
-        card = QFrame()
-        card.setObjectName('panel')
-        inner = QVBoxLayout(card)
-        inner.setContentsMargins(24, 24, 24, 24)
-        inner.setSpacing(10)
-        self.title_label = QLabel()
-        self.title_label.setObjectName('formTitle')
-        self.note_label = QLabel()
-        self.note_label.setObjectName('muted')
-        self.note_label.setWordWrap(True)
-        inner.addWidget(self.title_label)
-        inner.addWidget(self.note_label)
-        layout.addWidget(card)
-        layout.addStretch(1)
+        self.source_message = QLabel()
+        self.source_message.setObjectName('muted')
+        self.source_message.setWordWrap(True)
+        self.source_layout.addWidget(self.source_message)
+        self.target_message = QLabel()
+        self.target_message.setObjectName('muted')
+        self.target_message.setWordWrap(True)
+        self.target_layout.addWidget(self.target_message)
+        self.status_label = QLabel()
+        self.status_label.setObjectName('status')
+        self.footer_layout.addWidget(self.status_label, 1)
         self.retranslate(language)
 
     def retranslate(self, language: str):
         self.title_label.setText(tr(language, 'planned_title'))
         self.note_label.setText(tr(language, 'planned_note', pair=self.program,
                                    feature=tr(language, 'tab_' + self.feature)))
+        self.source_title.setText(tr(language, 'source_data'))
+        self.target_title.setText(tr(language, 'target_data'))
+        self.source_message.setText(tr(language, 'planned_source'))
+        self.target_message.setText(tr(language, 'planned_target'))
+        self.status_label.setText(tr(language, 'planned_title'))
 
 
 class DropArea(QFrame):
@@ -512,18 +572,11 @@ class MainWindow(QMainWindow):
         self.program_tabs.addTab(self.after_effects_tabs, 'After Effects ↔ EffectCraft')
         self.program_tabs.addTab(self.photoshop_tabs, 'Photoshop ↔ PhotoCraft')
 
-        # Only the project page needs a tall scrollable queue.
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        central = QWidget()
-        root = QVBoxLayout(central)
-        root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(12)
-
+        # The project queue uses the same page slots as every other subtab.
+        self.project_page = FeaturePage(self.premiere_tabs)
         self.drop = DropArea(self.language)
         self.drop.filesDropped.connect(self.add_paths)
-        root.addWidget(self.drop)
+        self.project_page.source_layout.addWidget(self.drop)
         actions = QHBoxLayout()
         self.add_btn = QPushButton()
         self.add_btn.clicked.connect(self.choose_files)
@@ -535,32 +588,21 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.remove_btn)
         actions.addStretch()
         actions.addWidget(self.clear_btn)
-        root.addLayout(actions)
+        self.project_page.source_layout.addLayout(actions)
 
-        outbox = QFrame()
-        outbox.setObjectName('panel')
-        out_layout = QVBoxLayout(outbox)
-        out_layout.setContentsMargins(16, 11, 16, 11)
-        out_layout.setSpacing(6)
-        out_head = QHBoxLayout()
-        self.output_title = QLabel()
-        self.output_title.setObjectName('section')
-        self.output_note = QLabel()
-        self.output_note.setObjectName('muted')
-        out_head.addWidget(self.output_title)
-        out_head.addStretch()
-        out_head.addWidget(self.output_note)
-        out_layout.addLayout(out_head)
-        row = QHBoxLayout()
-        self.output_edit = QLineEdit()
+        self.output_title = self.project_page.target_title
+        self.output_note = self.project_page.target_meta
+        self.output_note.show()
+        self.output_edit, self.browse_btn = self.project_page.file_row(
+            self.project_page.target_layout)
         self.output_edit.setText(self.settings.value('output_dir', '', type=str))
-        self.browse_btn = QPushButton()
         self.browse_btn.clicked.connect(self.choose_output_dir)
-        row.addWidget(self.output_edit, 1)
-        row.addWidget(self.browse_btn)
-        out_layout.addLayout(row)
-        root.addWidget(outbox)
 
+        queue_panel = QFrame()
+        queue_panel.setObjectName('panel')
+        queue_layout = QVBoxLayout(queue_panel)
+        queue_layout.setContentsMargins(16, 12, 16, 12)
+        queue_layout.setSpacing(8)
         qhead = QHBoxLayout()
         self.queue_title = QLabel()
         self.queue_title.setObjectName('section')
@@ -569,7 +611,7 @@ class MainWindow(QMainWindow):
         qhead.addWidget(self.queue_title)
         qhead.addStretch()
         qhead.addWidget(self.count_label)
-        root.addLayout(qhead)
+        queue_layout.addLayout(qhead)
         self.table = QTableWidget(0, 4)
         for index, mode in enumerate((QHeaderView.Stretch, QHeaderView.ResizeToContents,
                                       QHeaderView.ResizeToContents, QHeaderView.Stretch)):
@@ -580,14 +622,15 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setMinimumHeight(155)
         self.table.currentCellChanged.connect(self.update_reverse_panel)
-        root.addWidget(self.table, 1)
+        queue_layout.addWidget(self.table, 1)
+        self.project_page.details_layout.addWidget(queue_panel, 1)
 
         # These controls belong to the selected FC entry, not to the whole queue.
         self.reverse_panel = QFrame()
         self.reverse_panel.setObjectName('panel')
         reverse_layout = QVBoxLayout(self.reverse_panel)
-        reverse_layout.setContentsMargins(16, 10, 16, 10)
-        reverse_layout.setSpacing(6)
+        reverse_layout.setContentsMargins(16, 12, 16, 12)
+        reverse_layout.setSpacing(8)
         self.reverse_heading = QLabel()
         self.reverse_heading.setObjectName('section')
         self.reverse_note = QLabel()
@@ -605,9 +648,8 @@ class MainWindow(QMainWindow):
                                                         'png' if checked else 'native'))
         reverse_layout.addWidget(self.raster_checkbox)
         self.reverse_panel.hide()
-        root.addWidget(self.reverse_panel)
+        self.project_page.details_layout.addWidget(self.reverse_panel)
 
-        footer = QHBoxLayout()
         info = QVBoxLayout()
         self.status_label = QLabel()
         self.status_label.setObjectName('status')
@@ -618,22 +660,18 @@ class MainWindow(QMainWindow):
         self.progress.setValue(0)
         info.addWidget(self.status_label)
         info.addWidget(self.progress)
-        footer.addLayout(info, 1)
+        self.project_page.footer_layout.addLayout(info, 1)
         self.open_btn = QPushButton()
         self.open_btn.clicked.connect(self.open_selected_folder)
         self.open_btn.setEnabled(False)
-        footer.addWidget(self.open_btn)
+        self.project_page.footer_layout.addWidget(self.open_btn)
         self.run_btn = QPushButton()
         self.run_btn.setObjectName('primary')
         self.run_btn.clicked.connect(self.start_queue)
-        footer.addWidget(self.run_btn)
-        root.addLayout(footer)
-        self.footnote_label = QLabel()
-        self.footnote_label.setObjectName('footnote')
-        self.footnote_label.setWordWrap(True)
-        root.addWidget(self.footnote_label)
-        scroll.setWidget(central)
-        self.premiere_tabs.addTab(scroll, '')
+        self.project_page.footer_layout.addWidget(self.run_btn)
+        self.footnote_label = self.project_page.footnote_label
+        self.footnote_label.show()
+        self.premiere_tabs.addTab(self.project_page, '')
         self.shortcut_panel = ShortcutConverterPanel(self.premiere_tabs, self.language)
         self.premiere_tabs.addTab(self.shortcut_panel, '')
 
@@ -703,6 +741,9 @@ class MainWindow(QMainWindow):
         self.shortcut_panel.retranslate()
         self.plugin_panel.language = self.language
         self.plugin_panel.retranslate()
+        self.project_page.title_label.setText(self.t('project_heading'))
+        self.project_page.note_label.setText(self.t('project_note'))
+        self.project_page.source_title.setText(self.t('source_projects'))
         self.drop.language = self.language
         self.drop.retranslate()
         self.add_btn.setText(self.t('add'))

@@ -75,6 +75,53 @@ class MixedQueueUITests(unittest.TestCase):
             self.assertIn(shortcuts.name, warning.call_args.args[2])
         self.assertEqual(len(self.window.files), 2)
 
+    def test_every_subtab_uses_one_page_layout_with_source_target_and_footer(self):
+        pages = [tabs.widget(index)
+                 for tabs in (self.window.premiere_tabs, self.window.after_effects_tabs,
+                              self.window.photoshop_tabs)
+                 for index in range(3)]
+        self.assertEqual(len(pages), 9)
+        for page in pages:
+            with self.subTest(page=page.__class__.__name__):
+                self.assertIsInstance(page, desktop_app.FeaturePage)
+                self.assertTrue(page.widgetResizable())
+                self.assertIs(page.root.itemAt(0).widget(), page.title_label)
+                self.assertIs(page.root.itemAt(1).widget(), page.note_label)
+                self.assertIs(page.root.itemAt(2).widget(), page.source_panel)
+                self.assertIs(page.root.itemAt(3).widget(), page.target_panel)
+                self.assertIs(page.root.itemAt(4).layout(), page.details_layout)
+                self.assertIs(page.root.itemAt(5).layout(), page.footer_layout)
+                self.assertIs(page.root.itemAt(6).widget(), page.footnote_label)
+                self.assertEqual(page.root.spacing(), 12)
+                margins = page.root.contentsMargins()
+                self.assertEqual((margins.left(), margins.top(),
+                                  margins.right(), margins.bottom()), (18, 18, 18, 18))
+                for card in (page.source_panel, page.target_panel):
+                    self.assertEqual(card.objectName(), 'panel')
+                    card_margins = card.layout().contentsMargins()
+                    self.assertEqual((card_margins.left(), card_margins.top(),
+                                      card_margins.right(), card_margins.bottom()),
+                                     (16, 12, 16, 12))
+                self.assertTrue(page.title_label.text())
+                self.assertTrue(page.note_label.text())
+                self.assertTrue(page.source_title.text())
+                self.assertTrue(page.target_title.text())
+        self.assertIs(self.window.premiere_tabs.widget(0), self.window.project_page)
+        self.assertIs(self.window.project_page.source_panel.findChild(desktop_app.DropArea),
+                      self.window.drop)
+        self.assertIs(self.window.project_page.details_layout.itemAt(0).widget().findChild(
+            type(self.window.table)), self.window.table)
+        self.assertIs(self.window.shortcut_panel.input_edit.parent(),
+                      self.window.shortcut_panel.source_panel)
+        self.assertIs(self.window.plugin_panel.output_edit.parent(),
+                      self.window.plugin_panel.target_panel)
+        self.assertIs(self.window.project_page.footer_layout.itemAt(2).widget(),
+                      self.window.run_btn)
+        self.assertIs(self.window.shortcut_panel.footer_layout.itemAt(1).widget(),
+                      self.window.shortcut_panel.run_btn)
+        self.assertIs(self.window.plugin_panel.footer_layout.itemAt(1).widget(),
+                      self.window.plugin_panel.run_btn)
+
     def test_program_and_feature_tabs_preserve_state_on_language_switch(self):
         self.assertEqual(self.window.program_tabs.count(), 3)
         self.assertEqual([self.window.program_tabs.tabText(i) for i in range(3)], [
@@ -102,6 +149,16 @@ class MixedQueueUITests(unittest.TestCase):
         self.assertIn('planned', self.window.photoshop_tabs.tabText(0))
         self.assertIn('Not implemented yet', self.window.after_effects_tabs.tabToolTip(0))
         self.assertEqual(self.window.plugin_panel.input_edit.text(), 'keep this path')
+        self.assertEqual(self.window.project_page.title_label.text(),
+                         desktop_app.tr('en', 'project_heading'))
+        self.assertEqual(self.window.project_page.source_title.text(),
+                         desktop_app.tr('en', 'source_projects'))
+        self.assertEqual(self.window.shortcut_panel.target_title.text(),
+                         desktop_app.tr('en', 'target_shortcuts'))
+        self.assertEqual(self.window.plugin_panel.source_title.text(),
+                         desktop_app.tr('en', 'source_plugin'))
+        self.assertEqual(planned.target_message.text(),
+                         desktop_app.tr('en', 'planned_target'))
 
     def test_effectcraft_plugins_tab_stays_outside_project_queue_and_writes_wasm(self):
         from PySide6.QtWidgets import QFileDialog
@@ -123,6 +180,8 @@ class MixedQueueUITests(unittest.TestCase):
             notice.assert_called_once()
         self.assertEqual(output.read_bytes()[:4], b'\0asm')
         self.assertTrue(output.with_name(output.stem + '_conversion_report.md').exists())
+        self.assertEqual(panel.status_label.text(),
+                         desktop_app.tr(panel.language, 'done', name=output.name))
         self.assertEqual(self.window.files, [])  # Projects still use one shared queue.
         with patch.object(QMessageBox, 'critical') as error:
             panel.convert()
@@ -155,6 +214,8 @@ class MixedQueueUITests(unittest.TestCase):
         self.assertEqual(converted['format'], 'filmcraft-keyboard-shortcuts')
         self.assertIn({'command': 'tool.selection', 'keys': 'Cmd+V'}, converted['bindings'])
         self.assertTrue(output.with_name(output.stem + '_shortcuts_report.md').exists())
+        self.assertEqual(panel.status_label.text(),
+                         desktop_app.tr(panel.language, 'done', name=output.name))
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(output), '')):
             panel.choose_input()
         self.assertEqual(Path(panel.output_edit.text()).suffix, '.kys')
