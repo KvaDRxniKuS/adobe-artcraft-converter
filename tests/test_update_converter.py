@@ -101,6 +101,7 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual((selected / 'desktop_app.py').read_text(), 'print("updated")\n')
         self.assertTrue((selected / 'craft_converter' / 'project_import.py').is_file())
         self.assertTrue((selected / 'resources/shortcuts/FilmCraft_Shortcuts_Template.json').is_file())
+        self.assertTrue((selected / 'tools/export_ae_effect_metadata.jsx').is_file())
         self.assertFalse((selected / 'project_import.py').exists())
         self.assertTrue((selected / 'new_module.py').is_file())
         self.assertEqual((self.local / 'desktop_app.py').read_text(), 'print("local")\n')
@@ -170,13 +171,16 @@ class UpdaterTests(unittest.TestCase):
                      'effectcraft_deep_glow.py'):
             self.assertFalse((output / name).exists(), name)
             self.assertTrue((output / 'craft_converter' / name).is_file(), name)
-        # Embedded WASM is shipped as Python data in the internal package,
-        # without any binary build products, tools or .aex inputs.
+        # Embedded WASM is shipped as Python data; the allowlisted AE script
+        # is the sole file in tools (no binary build products or .aex inputs).
         for name in ('effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py'):
             self.assertEqual((output / 'craft_converter' / name).read_bytes(),
                              (repository / 'craft_converter' / name).read_bytes())
         self.assertFalse((output / 'effectcraft_plugins').exists())
-        self.assertFalse((output / 'tools').exists())
+        self.assertEqual([p.name for p in (output / 'tools').iterdir()],
+                         ['export_ae_effect_metadata.jsx'])
+        self.assertEqual((output / 'tools/export_ae_effect_metadata.jsx').read_bytes(),
+                         (repository / 'tools/export_ae_effect_metadata.jsx').read_bytes())
         self.assertFalse((output / 'FilmCraft_Shortcuts_Template.json').exists())
         self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))
         self.assertIn('flatbuffers', (output / 'requirements.txt').read_text(encoding='utf-8'))

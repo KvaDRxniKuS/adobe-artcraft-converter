@@ -56,6 +56,51 @@ def sample_deep_glow() -> bytes:
     return bytes(data)
 
 
+def sample_profile(effect_name='Novel Glow', match_name='vendor.novel') -> dict:
+    return {
+        'format': 'artcraft.ae-parameter-profile', 'version': 1,
+        'effect_name': effect_name, 'effect_match_name': match_name,
+        'properties': [{
+            'name': 'Radius', 'match_name': 'vendor.radius',
+            'groups': ['Glow', 'Main'], 'value_type': 'scalar',
+            'has_min': True, 'min_value': 0,
+            'has_max': False, 'max_value': None,
+            'can_vary_over_time': True, 'can_set_expression': False,
+            'ui_control': 'unknown',
+        }],
+    }
+
+
+def sample_with_pipl(source: bytes, name: str, category: str,
+                     match_name: str = 'example.match') -> bytes:
+    """Add a small real PE resource tree with AE PiPL name/category/match id."""
+    data = bytearray(source)
+    data.extend(bytes(max(0, 0x800 - len(data))))
+    pe = 0x80
+    struct.pack_into('<H', data, pe + 6, 2)  # .edata + .rsrc
+    opt = pe + 24
+    struct.pack_into('<II', data, opt + 112 + 2 * 8, 0x2000, 0x200)
+    sec = opt + 0xf0 + 40
+    data[sec:sec + 8] = b'.rsrc\0\0\0'
+    struct.pack_into('<IIII', data, sec + 8, 0x200, 0x2000, 0x200, 0x600)
+    base = 0x600
+    struct.pack_into('<HHII', data, base + 12, 1, 0, 0x800000a0, 0x80000020)
+    struct.pack_into('<HHII', data, base + 0x20 + 12, 0, 1, 0x3e80, 0x80000050)
+    struct.pack_into('<HHII', data, base + 0x50 + 12, 0, 1, 0x409, 0x80)
+    data[base + 0xa0:base + 0xaa] = struct.pack('<H', 4) + 'PIPL'.encode('utf-16le')
+    entries = []
+    for key, label in ((b'eman', name), (b'gtac', category), (b'ANMe', match_name)):
+        encoded = label.encode('ascii')
+        value = bytes([len(encoded)]) + encoded
+        value += bytes((-len(value)) % 4)
+        entries.append(b'MIB8' + key + bytes(4) + struct.pack('<I', len(value)) + value)
+    blob = struct.pack('<IH', 1, 0) + struct.pack('<I', len(entries)) + b''.join(entries)
+    assert len(blob) < 0x130
+    struct.pack_into('<II', data, base + 0x80, 0x20c0, len(blob))
+    data[base + 0xc0:base + 0xc0 + len(blob)] = blob
+    return bytes(data)
+
+
 class AexTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -74,6 +119,108 @@ class AexTests(unittest.TestCase):
         self.assertEqual(info.family, 'pixel_sorter')
         self.assertEqual(info.architecture, 'x64')
         self.assertEqual(output_stem(self.source), 'Sample')
+
+    def test_pipl_identifies_an_unknown_effect_without_inventing_controls(self):
+        data = sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2')
+        self.source.write_bytes(sample_with_pipl(data, 'Novel Glow', 'Custom', 'vendor.novel'))
+        info = inspect_aex(self.source)
+        self.assertIsNone(info.family)
+        self.assertEqual(info.pipl_effects[0].name, 'Novel Glow')
+        self.assertEqual(info.pipl_effects[0].category, 'Custom')
+        self.assertEqual(info.pipl_effects[0].match_name, 'vendor.novel')
+        with self.assertRaises(UnsupportedAexError) as outcome:
+            convert_aex(self.source, self.output, language='en')
+        self.assertFalse(self.output.exists())
+        report = outcome.exception.report.read_text(encoding='utf-8')
+        self.assertIn('Novel Glow [Custom; vendor.novel]', report)
+        self.assertIn('bounds', report)
+        self.assertIn('group hierarchy', report)
+        self.assertIn('keyframe/curve capabilities cannot be verified', report)
+
+    def test_optional_ae_host_profile_reports_bounds_groups_and_keyframes(self):
+        source = sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2')
+        self.source.write_bytes(sample_with_pipl(source, 'Novel Glow', 'Custom', 'vendor.novel'))
+        profile = self.base / 'ae_profile.json'
+        profile.write_text(json.dumps(sample_profile()), encoding='utf-8')
+        with self.assertRaises(UnsupportedAexError) as outcome:
+            convert_aex(self.source, self.output, language='en', ae_profile=profile)
+        self.assertFalse(self.output.exists())  # Metadata does not invent an effect.
+        text = outcome.exception.report.read_text(encoding='utf-8')
+        self.assertIn('cross-checked against the DLL PiPL: yes', text)
+        self.assertIn('Glow › Main › Radius', text)
+        self.assertIn('min 0.0; max none; keyframes yes; expressions no', text)
+        self.assertIn('UI widget unknown', text)
+        self.assertIn('no WASM created', text)
+        outcome.exception.report.unlink()
+        self.assertEqual(main([str(self.source), str(self.output), '--language', 'en',
+                               '--ae-profile', str(profile)]), 2)
+        self.assertFalse(self.output.exists())
+        self.output.with_name(self.output.stem + '_aex_analysis.md').unlink()
+
+        # A matching known port still exports its independently written WASM;
+        # the AE-host observations are reported, never applied to its renderer.
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(),
+                                                 'Deep Glow', 'Stylize', 'PEDG'))
+        profile.write_text(json.dumps(sample_profile('Deep Glow', 'PEDG')), encoding='utf-8')
+        report = convert_aex(self.source, self.output, language='en', ae_profile=profile)
+        self.assertEqual(self.output.read_bytes(), GLOW_WASM)
+        self.assertIn('Glow › Main › Radius', report.read_text(encoding='utf-8'))
+
+    def test_ae_profile_without_pipl_does_not_claim_a_cross_check(self):
+        # The AE script can inventory an effect even when a PiPL is absent or
+        # inaccessible; never turn missing evidence into a false mismatch.
+        self.source.write_bytes(sample_deep_glow())
+        profile = self.base / 'ae_profile.json'
+        profile.write_text(json.dumps(sample_profile('Deep Glow', 'PEDG')), encoding='utf-8')
+        report = convert_aex(self.source, self.output, language='en', ae_profile=profile)
+        self.assertIn('cross-checked against the DLL PiPL: unknown',
+                      report.read_text(encoding='utf-8'))
+
+    def test_profile_must_match_declared_effect_and_not_contain_values(self):
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(),
+                                                 'Deep Glow', 'Stylize', 'PEDG'))
+        profile = self.base / 'ae_profile.json'
+        profile.write_text(json.dumps(sample_profile()), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            convert_aex(self.source, self.output, ae_profile=profile)
+        self.assertFalse(self.output.exists())
+        data = sample_profile('Deep Glow', 'PEDG')
+        data['properties'][0]['value'] = 42
+        profile.write_text(json.dumps(data), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'values are forbidden'):
+            convert_aex(self.source, self.output, ae_profile=profile)
+        self.assertFalse(self.output.exists())
+        data['properties'][0].pop('value')
+        data['properties'][0]['ui_control'] = 'slider'  # AE script cannot verify this.
+        profile.write_text(json.dumps(data), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'must be marked unknown'):
+            convert_aex(self.source, self.output, ae_profile=profile)
+        self.assertFalse(self.output.exists())
+        profile_wasm = self.base / 'ae_profile.wasm'
+        profile_wasm.write_text(json.dumps(sample_profile('Deep Glow', 'PEDG')), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'не должен перезаписывать'):
+            convert_aex(self.source, profile_wasm, ae_profile=profile_wasm)
+
+    def test_pipl_identity_prevents_a_false_known_port(self):
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(), 'Different Effect', 'Custom'))
+        self.assertIsNone(inspect_aex(self.source).family)
+        with self.assertRaises(UnsupportedAexError):
+            convert_aex(self.source, self.output)
+        self.assertFalse(self.output.exists())
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(), 'Deep Glow',
+                                                 'Stylize', 'example.match'))
+        self.assertIsNone(inspect_aex(self.source).family)  # Same label, wrong plug-in.
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(), 'Deep Glow',
+                                                 'Stylize', 'PEDG'))
+        self.assertEqual(inspect_aex(self.source).family, 'deep_glow')
+
+    def test_damaged_optional_pipl_is_ignored_without_executing_it(self):
+        data = bytearray(sample_with_pipl(sample_deep_glow(), 'Deep Glow', 'Stylize'))
+        struct.pack_into('<I', data, 0x600 + 0x80, 0xffffffff)
+        self.source.write_bytes(data)
+        info = inspect_aex(self.source)
+        self.assertEqual(info.pipl_effects, ())
+        self.assertEqual(info.family, 'deep_glow')  # Existing label fallback still works.
 
     def test_converts_to_identical_embedded_wasm_with_cautionary_report(self):
         report = convert_aex(self.source, self.output, language='en')
@@ -97,6 +244,7 @@ class AexTests(unittest.TestCase):
         report_text = report.read_text(encoding='utf-8')
         self.assertIn('multi-scale bloom', report_text)
         self.assertIn('Gaussian-like', report_text)
+        self.assertIn('16 times the longest frame dimension', report_text)
         self.assertIn('Quit EffectCraft', report_text)
         self.assertIn('NOT the original', report_text)
         self.assertNotIn(b'Deep Glow 2\0', self.output.read_bytes())
@@ -216,6 +364,13 @@ class AexTests(unittest.TestCase):
                 else:
                     self.assertIn(param['type'], ('checkbox', 'angle'))
 
+    @unittest.skipUnless(shutil.which('node'), 'Node.js needed for JSX simulator test')
+    def test_ae_host_script_exports_only_observable_metadata_in_a_mock(self):
+        completed = subprocess.run(['node', str(ROOT / 'tests/ae_metadata_script_smoke.cjs')],
+                                   cwd=ROOT, capture_output=True, text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn('PASS', completed.stdout)
+
     @unittest.skipUnless(shutil.which('node'), 'Node.js needed to execute the WebAssembly smoke tests')
     def test_wasm_render_in_real_webassembly_runtime(self):
         completed = subprocess.run(['node', str(ROOT / 'tests/effectcraft_wasm_smoke.cjs')],
@@ -264,6 +419,8 @@ class AexTests(unittest.TestCase):
         info = inspect_aex(REAL_AEX)
         self.assertEqual(info.sha256, '57f8a35fe255986013e43acfd1a9fd1665ca6e1a041025f71d52a010ebbe2d3f')
         self.assertEqual(info.size, 5335552)
+        self.assertEqual((info.pipl_effects[0].name, info.pipl_effects[0].match_name),
+                         ('AE Pixel Sorter 2', 'GG AEPixelSorter2'))
         report = convert_aex(REAL_AEX, self.output)
         self.assertEqual(self.output.read_bytes(), WASM)
         self.assertIn(info.sha256, report.read_text(encoding='utf-8'))

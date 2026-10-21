@@ -15,7 +15,7 @@ const manifest = JSON.parse(Buffer.from(instance.memory.buffer,
   instance.ec_manifest_ptr(), instance.ec_manifest_len()).toString('utf8'));
 assert.equal(manifest.id, 'org.artcraft_converter.deep_glow');
 assert.equal(manifest.api, 1);
-assert.equal(manifest.version, '0.2.0');
+assert.equal(manifest.version, '0.3.0');
 assert.equal(manifest.params.length, 14);
 const index = Object.fromEntries(manifest.params.map((p, n) => [p.id, n]));
 
@@ -114,6 +114,21 @@ const mixedDiagonal = mixed[(mixedCenter + 21) * mixedSize + mixedCenter + 21][0
 assert.ok(mixedAxis > 0 && mixedDiagonal > 0);
 assert.ok(Math.abs(mixedAxis - mixedDiagonal) / Math.max(mixedAxis, mixedDiagonal) < 0.25,
           'default multi-scale halo must be approximately circular');
+
+// Radius 256 is only the end of the convenient slider, NOT a hard effect
+// limit: a typed value above it must actually broaden the rendered halo.
+const wideSize = 97, wideCenter = 48;
+const wideInput = impulse(wideSize, wideSize, wideCenter, wideCenter);
+const wideControls = {spread: 0, quality: 0, blend_mode: 2, exposure: 0,
+                      threshold: 50, threshold_smooth: 0, source_opacity: 0};
+const narrowRadius = render(wideInput, wideSize, wideSize, {...wideControls, radius: 256});
+const wideRadius = render(wideInput, wideSize, wideSize, {...wideControls, radius: 512});
+const centerIndex = wideCenter * wideSize + wideCenter;
+assert.ok(wideRadius[centerIndex][0] > 0 && wideRadius[centerIndex][0] < narrowRadius[centerIndex][0],
+          'a radius beyond 256 must spread a highlight further');
+const enormousRadius = render(wideInput, wideSize, wideSize, {...wideControls, radius: 1e9});
+assert.deepEqual(enormousRadius, render(wideInput, wideSize, wideSize,
+  {...wideControls, radius: wideSize * 16}), 'extreme input safely saturates at a frame-relative size');
 
 const tinyHalo = render(impulse(21, 21, 10, 10), 21, 21,
   {radius: 8, spread: 0, quality: 0, blend_mode: 2, exposure: 0,

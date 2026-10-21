@@ -143,7 +143,8 @@ export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
   let filtered: i32 = temp + n * 12;
   let accum: i32 = filtered + n * 12;
   let weights: i32 = accum + n * 12; // 64 bytes for tiny Gaussian kernels.
-  let radius: f64 = param(params, 0, 0.0, 256.0, 48.0);
+  // The UI number field is not capped at the slider's convenient 256 px range.
+  let radius: f64 = param(params, 0, 0.0, 1000000000.0, 48.0);
   let exposure: f64 = param(params, 1, -4.0, 5.0, 1.5);
   let threshold: f32 = <f32>(param(params, 2, 0.0, 100.0, 60.0) / 100.0);
   let smooth: f32 = <f32>(param(params, 3, 0.0, 100.0, 20.0) / 100.0);
@@ -157,8 +158,13 @@ export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
   let srcOpacity: f32 = <f32>(param(params, 11, 0.0, 100.0, 100.0) / 100.0);
   let expandAlpha: bool = param(params, 12, 0.0, 1.0, 1.0) >= 0.5;
   let levels: i32 = <i32>param(params, 13, 0.0, 2.0, 1.0) + 2;
-  let r: i32 = <i32>Math.round(radius * clamp(scale, 0.01, 8.0, 1.0));
-  if (r > 256) r = 256;
+  // Cap internal work at a frame-relative radius BEFORE converting to i32.
+  // At 16 * max dimension, even the smallest 1/8-scale box radius covers the
+  // entire frame; larger requests add negligible detail but are still editable
+  // and animatable in the host instead of wrapping the integer.
+  let effective: f64 = Math.min(radius * clamp(scale, 0.01, 8.0, 1.0),
+                                16.0 * <f64>max<i32>(width, height));
+  let r: i32 = <i32>Math.round(effective);
 
   // Extract bright areas from *straight* RGB, but keep the samples
   // premultiplied. Fading edges can emit glow without losing alpha.
@@ -216,7 +222,8 @@ export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
       let lowerWidth: i32 = <i32>Math.floor(Math.sqrt(4.0 * variance + 1.0));
       if ((lowerWidth & 1) == 0) lowerWidth--;
       let narrowCount: i32 = clamped(<i32>Math.round(
-        (12.0 * variance - 3.0 * lowerWidth * lowerWidth - 12.0 * lowerWidth - 9.0)
+        (12.0 * variance - 3.0 * <f64>lowerWidth * <f64>lowerWidth
+         - 12.0 * <f64>lowerWidth - 9.0)
         / (-4.0 * lowerWidth - 4.0)), 3);
       for (let pass: i32 = 0; pass < 3; pass++) {
         let boxRadius: i32 = (lowerWidth - 1) / 2 + (pass < narrowCount ? 0 : 1);

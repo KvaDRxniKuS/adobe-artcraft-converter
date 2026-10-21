@@ -26,7 +26,10 @@ class DeepGlowTests(unittest.TestCase):
         packed = json.dumps(MANIFEST, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.assertEqual(hashlib.sha256(packed).hexdigest(), MANIFEST_SHA256)
         self.assertEqual(MANIFEST['api'], 1)
-        self.assertEqual(MANIFEST['version'], '0.2.0')
+        self.assertEqual(MANIFEST['version'], '0.3.0')
+        radius = next(p for p in MANIFEST['params'] if p['id'] == 'radius')
+        self.assertEqual(radius['sliderMax'], 256)
+        self.assertGreater(radius['max'], radius['sliderMax'])
         self.assertEqual(MANIFEST['category'], 'Stylize')
         self.assertRegex(MANIFEST['id'], r'^[A-Za-z0-9_.-]+$')
         names = [p['id'] for p in MANIFEST['params']]
@@ -61,7 +64,7 @@ class DeepGlowTests(unittest.TestCase):
         module = wasmtime.Module(engine, WASM)
         self.assertEqual(list(module.imports), [])
         for side in (1, 8, 32, 128):
-            for radius, quality in ((48, 1), (256, 2), (8, 2)):
+            for radius, quality in ((48, 1), (256, 2), (512, 2), (1e9, 2), (8, 2)):
                 with self.subTest(side=side, radius=radius, quality=quality):
                     store = wasmtime.Store(engine)
                     budget = 50_000_000 + 20_000 * side * side
@@ -90,6 +93,8 @@ class DeepGlowTests(unittest.TestCase):
         self.assertEqual(info.sha256, '6c952b1538632605deea6cf167a3b242f490821ab008cffc7dd37f862b532c86')
         self.assertEqual(info.family, 'deep_glow')
         self.assertEqual(info.architecture, 'x64')
+        self.assertEqual((info.pipl_effects[0].name, info.pipl_effects[0].match_name),
+                         ('Deep Glow', 'PEDG'))
         self.assertIn('EffectMain', info.exports)
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / 'DeepGlow_EffectCraft.wasm'

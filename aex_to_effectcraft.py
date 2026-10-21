@@ -15,6 +15,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from craft_converter.aex_metadata import AEEffectIdentity, read_pipl_identities
+from craft_converter.ae_profile import load_ae_profile, profile_report
 from craft_converter.effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
 from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
                                    WASM_SHA256 as GLOW_SHA256)
@@ -49,6 +51,7 @@ class AexDetails:
     labels: tuple[str, ...]
     architecture: str
     family: str | None
+    pipl_effects: tuple[AEEffectIdentity, ...] = ()
 
 
 def _u16(data: bytes, offset: int) -> int:
@@ -136,6 +139,11 @@ def inspect_aex(path: Path) -> AexDetails:
             names = rva_offset(names_rva, scan_count * 4)
             exports = tuple(_cstr(data, rva_offset(_u32(data, names + idx * 4), 1))
                             for idx in range(scan_count))
+    pipl_effects = ()
+    if optional_size >= directory_offset + 24:
+        pipl_effects = read_pipl_identities(
+            data, _u32(data, opt + directory_offset + 16),
+            _u32(data, opt + directory_offset + 20), rva_offset)
     exported = _EFFECT_EXPORTS.issubset(exports)
     family = None
     labels: tuple[str, ...] = ()
@@ -145,8 +153,32 @@ def inspect_aex(path: Path) -> AexDetails:
     elif exported and all(label in data for label in _GLOW_LABELS):
         family = 'deep_glow'
         labels = tuple(label[:-1].decode('ascii') for label in _GLOW_LABELS)
+    if pipl_effects and family:
+        # If a DLL declares an identity, do not export a known port merely
+        # because some unrelated string in a multi-effect DLL mentions it.
+        names, matches = {
+            'pixel_sorter': ({'ae pixel sorter 2', 'pixel sorter 2'},
+                             {'GG AEPixelSorter2'}),
+            'deep_glow': ({'deep glow', 'deep glow 2'}, {'PEDG'}),
+        }[family]
+        if not any(effect.name.casefold() in names and
+                   (effect.match_name is None or effect.match_name in matches)
+                   for effect in pipl_effects):
+            family, labels = None, ()
     return AexDetails(len(data), hashlib.sha256(data).hexdigest(), timestamp,
-                      exports, labels, architecture, family)
+                      exports, labels, architecture, family, pipl_effects)
+
+
+def pipl_report_line(info: AexDetails, language: str) -> str:
+    """Separate declared PiPL identity from unverified parameter UI/behaviour."""
+    if info.pipl_effects:
+        effects = '; '.join(f'{e.name} [{e.category or "?"}; {e.match_name or "?"}]'
+                            for e in info.pipl_effects)
+    else:
+        effects = 'not found' if language == 'en' else 'не обнаружены'
+    key = 'PiPL identity (name [category; match name])' if language == 'en' else (
+        'PiPL (имя [категория; match name])')
+    return f'- {key}: {effects}\n'
 
 
 def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -> str:
@@ -156,7 +188,13 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
         return (f'# .aex analysis — no WASM created\n\n'
                 f'- Input: `{source.name}` ({info.size} bytes, PE {info.architecture})\n'
                 f'- SHA-256: `{info.sha256}`\n'
-                f'- Export names scanned: {len(info.exports)}; AE entry points: {entrypoints}\n\n'
+                f'- Export names scanned: {len(info.exports)}; AE entry points: {entrypoints}\n'
+                f'{pipl_report_line(info, language)}\n'
+                'PiPL describes effect identity, not the render algorithm or parameter UI. '
+                'Blur shape, per-parameter hard/soft bounds, slider vs numeric field, '
+                'group hierarchy and keyframe/curve capabilities cannot be verified from '
+                'this static DLL inspection. They require an AE-host parameter inventory or '
+                'user-supplied reference; they are not guessed here.\n\n'
                 'The Windows DLL was inspected statically and was NOT executed. '
                 'This is not one of the independently implemented effects. '
                 'EffectCraft cannot run After Effects binary code; simply lifting the '
@@ -168,7 +206,13 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
     return (f'# Анализ .aex — WASM не создан\n\n'
             f'- Вход: `{source.name}` ({info.size} байт, PE {info.architecture})\n'
             f'- SHA-256: `{info.sha256}`\n'
-            f'- Имен экспортов проверено: {len(info.exports)}; точки входа AE: {entrypoints}\n\n'
+            f'- Имен экспортов проверено: {len(info.exports)}; точки входа AE: {entrypoints}\n'
+            f'{pipl_report_line(info, language)}\n'
+            'PiPL содержит идентификатор эффекта, но не алгоритм и не полную схему '
+            'параметров. Форма размытия, жёсткие/мягкие границы, тип поля или ползунка, '
+            'группы и доступность ключевых кадров/кривых не определяются надёжно по '
+            'такому статическому анализу DLL. Нужна инвентаризация через AE или '
+            'данные пользователя; конвертер не угадывает их.\n\n'
             'Windows DLL исследована статически и НЕ запускалась. Для этого эффекта пока '
             'нет отдельной реализации. EffectCraft не исполняет код плагинов After Effects: '
             'снятие проверки имени или переименование в .wasm не создаст рабочий эффект. '
@@ -188,7 +232,8 @@ def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
                 f'- SHA-256: `{info.sha256}`\n'
                 f'- Output: `{output.name}` ({len(GLOW_WASM)} bytes, WASM API v1)\n'
                 f'- Effect id: `{GLOW_MANIFEST["id"]}`; version {GLOW_MANIFEST["version"]}; '
-                f'{len(GLOW_MANIFEST["params"])} controls\n\n'
+                f'{len(GLOW_MANIFEST["params"])} controls\n'
+                f'{pipl_report_line(info, language)}\n'
                 'This **working independent multi-scale bloom** is NOT the original '
                 'Deep Glow 2 binary or an exact reimplementation. The supplied .aex '
                 'was inspected for identity and public UI labels only; no Adobe code, '
@@ -198,7 +243,15 @@ def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
                 'three-box approximation for larger scales), then blends light back '
                 'using exposure, spread, optional tint and alpha expansion. Its rendering, '
                 'GPU features, controls, presets and look may differ substantially from '
-                'AE Deep Glow 2. No paired After Effects reference frames were supplied: '
+                'AE Deep Glow 2. Radius 256 is only the slider endpoint: type a larger '
+                'number (up to our chosen 1e9 hard maximum; API v1 requires a finite '
+                'one). The internal effective blur radius saturates at 16 times the '
+                'longest frame dimension, rather than clipping at 256; beyond that '
+                'the image no longer changes. These settings '
+                'describe our port, NOT values extracted from the original .aex. '
+                'EffectCraft v1 has flat plug-in controls (no custom parameter groups '
+                'or curve widgets), but ordinary plug-in properties can be keyframed. '
+                'No paired After Effects reference frames were supplied: '
                 'visual parity is unverified.\n\n'
                 'Quit EffectCraft before replacing the earlier port: plug-ins with the '
                 'same effect id cannot be loaded twice in one session. Keep only the new '
@@ -212,7 +265,8 @@ def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
             f'- SHA-256: `{info.sha256}`\n'
             f'- Выход: `{output.name}` ({len(GLOW_WASM)} байт, WASM API v1)\n'
             f'- ID эффекта: `{GLOW_MANIFEST["id"]}`; версия {GLOW_MANIFEST["version"]}; '
-            f'{len(GLOW_MANIFEST["params"])} параметров\n\n'
+            f'{len(GLOW_MANIFEST["params"])} параметров\n'
+            f'{pipl_report_line(info, language)}\n'
             'Это **работающий самостоятельный многомасштабный bloom**, а НЕ бинарник '
             'Deep Glow 2 и не точная копия его алгоритма. Исходный .aex исследован '
             'только для определения типа и видимых названий настроек; код, лицензия '
@@ -222,7 +276,15 @@ def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
             'для больших, затем смешивает свечение со слоем. Есть радиус, экспозиция, '
             'распространение, окраска и расширение альфа-канала. GPU-функции, настройки, '
             'пресеты и итоговая картинка могут значительно отличаться от оригинала. '
-            'Парных эталонных кадров AE нет: совпадение не подтверждено.\n\n'
+            '256 — край ползунка Radius, а не предел для числового поля: '
+            'можно ввести больше (до выбранной нами границы 1e9: API v1 требует '
+            'конечного максимума). '
+            'Эффективный радиус рендера насыщается на 16-кратной длинной стороне '
+            'кадра: дальше результат не меняется (не обрезается на 256). Это свойства '
+            'нашего порта, НЕ извлечённые из исходного .aex. В API v1 параметры '
+            'плагина плоские (без вложенных групп и редактора кривой), но обычные '
+            'параметры поддерживают ключевые кадры. Парных эталонных кадров AE нет: '
+            'совпадение не подтверждено.\n\n'
             'Перед заменой старой версии закройте EffectCraft: два плагина с одним ID '
             'нельзя загрузить в одной сессии. Оставьте в папке автозагрузки только новый '
             'файл, перезапустите EffectCraft и выберите Effect → Load Effect Plug-in… → '
@@ -242,7 +304,8 @@ def report_text(source: Path, output: Path, info: AexDetails, language: str = 'r
                 f'- PE build date (not proof of plug-in version): {stamp}\n'
                 f'- Source SHA-256: `{info.sha256}`\n'
                 f'- Result: `{output.name}` ({len(WASM)} bytes, EffectCraft WASM API v1)\n'
-                f'- Effect id: `{MANIFEST["id"]}`, {len(MANIFEST["params"])} controls\n\n'
+                f'- Effect id: `{MANIFEST["id"]}`, {len(MANIFEST["params"])} controls\n'
+                f'{pipl_report_line(info, language)}\n'
                 'This is a **working independent pixel-sorting algorithm**, NOT a binary '
                 'translation of AE Pixel Sorter 2. The provided .aex was read only for '
                 'format recognition and names of controls; its code and license are not '
@@ -263,7 +326,8 @@ def report_text(source: Path, output: Path, info: AexDetails, language: str = 'r
             f'- Дата из PE (не подтверждает версию плагина): {stamp}\n'
             f'- SHA-256 входа: `{info.sha256}`\n'
             f'- Выход: `{output.name}` ({len(WASM)} байт, WASM API v1 EffectCraft)\n'
-            f'- ID эффекта: `{MANIFEST["id"]}`, {len(MANIFEST["params"])} параметров\n\n'
+            f'- ID эффекта: `{MANIFEST["id"]}`, {len(MANIFEST["params"])} параметров\n'
+            f'{pipl_report_line(info, language)}\n'
             'Это **работающая независимая реализация сортировки пикселей**, а НЕ '
             'трансляция закрытого кода AE Pixel Sorter 2. Исходный .aex анализируется '
             'только для распознавания формата и названий параметров: его код/лицензия '
@@ -280,20 +344,24 @@ def report_text(source: Path, output: Path, info: AexDetails, language: str = 'r
             'проверены отдельно. Сравните с рендером Adobe перед использованием.\n')
 
 
-def convert_aex(source: Path, output: Path, *, language: str = 'ru') -> Path:
-    """Convert recognized families; for any other valid DLL, report without a WASM."""
+def convert_aex(source: Path, output: Path, *, language: str = 'ru',
+                ae_profile: Path | None = None) -> Path:
+    """Convert known ports; optional AE-host metadata is diagnostic only."""
     source, output = Path(source), Path(output)
+    ae_profile = Path(ae_profile) if ae_profile is not None else None
     if output.suffix.lower() != '.wasm':
         raise ValueError('Результат должен иметь расширение .wasm.')
     conversion_report = output.with_name(output.stem + '_conversion_report.md')
     analysis_report = output.with_name(output.stem + '_aex_analysis.md')
-    if any(same_file(candidate, source) for candidate in
-           (output, conversion_report, analysis_report)):
-        raise ValueError('Результат не должен перезаписывать исходный .aex.')
+    if any(same_file(candidate, original)
+           for candidate in (output, conversion_report, analysis_report)
+           for original in (source, ae_profile) if original is not None):
+        raise ValueError('Результат не должен перезаписывать исходный .aex или профиль AE.')
     info = inspect_aex(source)
     report = conversion_report if info.family in _PORTS else analysis_report
     if output.exists() or report.exists():
         raise FileExistsError('Файл результата или отчёта уже существует; выберите другое имя.')
+    profile = load_ae_profile(ae_profile, info.pipl_effects) if ae_profile else None
     output.parent.mkdir(parents=True, exist_ok=True)
     if info.family not in _PORTS:
         # No renamed PE and no unrelated/stub effect: the report is a real
@@ -302,7 +370,10 @@ def convert_aex(source: Path, output: Path, *, language: str = 'ru') -> Path:
         try:
             with report.open('x', encoding='utf-8') as file:
                 created = True
-                file.write(unported_report_text(source, info, language))
+                text = unported_report_text(source, info, language)
+                if profile:
+                    text += '\n' + profile_report(profile, language)
+                file.write(text)
         except BaseException:
             if created:
                 report.unlink(missing_ok=True)
@@ -313,6 +384,8 @@ def convert_aex(source: Path, output: Path, *, language: str = 'ru') -> Path:
     if hashlib.sha256(wasm).hexdigest() != digest or manifest.get('api') != 1:
         raise RuntimeError('Встроенный EffectCraft WASM повреждён; конвертация прервана.')
     text = report_text(source, output, info, language)
+    if profile:
+        text += '\n' + profile_report(profile, language)
     created = []
     try:
         with output.open('xb') as file:
@@ -342,10 +415,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('input', type=Path, help='AE .aex effect DLL (also .aex.txt)')
     parser.add_argument('output', type=Path, nargs='?', help='New .wasm file (never overwritten)')
     parser.add_argument('--language', choices=('ru', 'en'), default='ru')
+    parser.add_argument('--ae-profile', type=Path,
+                        help='Optional value-free AE-host metadata JSON; reports only, not a renderer')
     args = parser.parse_args(argv)
     output = args.output or args.input.with_name(output_stem(args.input) + '_effectcraft.wasm')
     try:
-        report = convert_aex(args.input, output, language=args.language)
+        report = convert_aex(args.input, output, language=args.language,
+                             ae_profile=args.ae_profile)
     except UnsupportedAexError as exc:
         print(f'Нет независимого порта; WASM не создан. Диагностика: {exc.report}', file=sys.stderr)
         return 2

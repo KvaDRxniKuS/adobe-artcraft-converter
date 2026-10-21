@@ -35,7 +35,8 @@ ROOT_ENTRY_POINTS = frozenset({
     'fcproj_to_prproj.py', 'shortcut_converter.py', 'aex_to_effectcraft.py',
 })
 CORE_MODULES = frozenset({
-    'craft_converter/__init__.py', 'craft_converter/direct_fc_to_prproj.py',
+    'craft_converter/__init__.py', 'craft_converter/aex_metadata.py',
+    'craft_converter/ae_profile.py', 'craft_converter/direct_fc_to_prproj.py',
     'craft_converter/project_import.py', 'craft_converter/reverse_project.py',
     'craft_converter/graphic_raster.py', 'craft_converter/premiere_seed.py',
     'craft_converter/premiere_text.py', 'craft_converter/premiere_text_seed.py',
@@ -46,7 +47,11 @@ SHORTCUT_TEMPLATES = frozenset({
     'resources/shortcuts/FilmCraft_Shortcuts_Template.json',
     'resources/shortcuts/Premiere_Shortcuts_Template.kys',
 })
-REQUIRED_FILES = ROOT_ENTRY_POINTS | CORE_MODULES | SHORTCUT_TEMPLATES | {'requirements.txt'}
+# Script source needed for the optional AE-host metadata workflow. Do not
+# download build tools or other arbitrary files from the tools directory.
+AE_HOST_SCRIPTS = frozenset({'tools/export_ae_effect_metadata.jsx'})
+REQUIRED_FILES = (ROOT_ENTRY_POINTS | CORE_MODULES | SHORTCUT_TEMPLATES |
+                  AE_HOST_SCRIPTS | {'requirements.txt'})
 MAX_BRANCHES = 40  # Unauthenticated GitHub API calls are limited to 60 per hour.
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 16 * 1024 * 1024
@@ -150,7 +155,7 @@ def valid_cached_version(folder: Path, versions: Path) -> bool:
             and valid_app_dir(folder)
             and all(not (folder / name).is_symlink() for name in REQUIRED_FILES)
             and all(not (folder / directory).is_symlink() for directory in
-                    ('craft_converter', 'resources', 'resources/shortcuts')))
+                    ('craft_converter', 'resources', 'resources/shortcuts', 'tools')))
 
 
 def cached_app(cache_dir: Path) -> Path | None:
@@ -205,15 +210,17 @@ def unpack_source(archive: Path, destination: Path) -> None:
             if parts[0] in ('', '.', '..', '/') or any(part in ('', '.', '..') for part in parts[1:]):
                 raise UpdateError('Unsafe archive path')
             relative = '/'.join(parts[1:])
-            # No arbitrary directories: tests, tools, user data and WASM builds
-            # never enter the source-only update cache. The embedded effects
-            # travel inside craft_converter/effectcraft_*.py instead.
+            # No arbitrary directories: tests, build tools, user data and WASM
+            # builds never enter the source-only cache. The sole AE-host JSX
+            # script is allowed explicitly; embedded effects travel in Python.
             if len(parts) == 2:
                 selected = SAFE_PY_NAME.fullmatch(parts[1]) or relative == 'requirements.txt'
             elif len(parts) == 3 and parts[1] == 'craft_converter':
                 selected = SAFE_PY_NAME.fullmatch(parts[2])
             elif len(parts) == 4 and parts[1:3] == ('resources', 'shortcuts'):
                 selected = relative in SHORTCUT_TEMPLATES
+            elif len(parts) == 3 and parts[1] == 'tools':
+                selected = relative in AE_HOST_SCRIPTS
             else:
                 selected = False
             if not selected:

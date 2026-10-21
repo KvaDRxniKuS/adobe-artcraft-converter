@@ -74,8 +74,12 @@ TEXT = {
         'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — откройте вкладку «Горячие клавиши»','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
         'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
         'plugin_heading':'Плагины AE → EffectCraft',
-        'plugin_note':'Проверяйте любой .aex. Для Pixel Sorter 2 и Deep Glow создаются самостоятельные работающие WASM-эффекты; для остальных — диагностический отчёт без подмены плагина. Исходный DLL не запускается; совпадение с AE не гарантировано.',
+        'plugin_note':'Проверяйте любой .aex: PiPL сообщает имя/категорию, но не алгоритм и параметры. Файл профиля из AE (необязательно) добавит проверенные границы, группы и ключевые кадры в отчёт. Только Pixel Sorter 2 и Deep Glow имеют отдельный WASM-порт.',
         'plugin_input':'Исходный плагин After Effects .aex', 'plugin_output':'Новый файл эффекта .wasm',
+        'plugin_profile':'Профиль параметров AE .json (необязательно)',
+        'plugin_profile_choose':'Выберите профиль, экспортированный скриптом из After Effects',
+        'plugin_profile_filter':'Профиль AE (*.json);;Все файлы (*)',
+        'plugin_profile_hint':'Получение: tools/export_ae_effect_metadata.jsx в AE. Профиль не создаёт WASM для неизвестного эффекта.',
         'plugin_choose':'Выберите плагин After Effects .aex',
         'plugin_filter':'Плагины Adobe (*.aex *.aex.txt);;Все файлы (*)',
         'plugin_save':'Сохранить независимый плагин EffectCraft',
@@ -140,8 +144,12 @@ TEXT = {
         'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the Hotkeys tab','invalid_missing':'file not found','invalid_more':'…and {n} more',
         'report_write_failed':'Project created, but the report could not be saved: {error}',
         'plugin_heading':'AE plug-ins → EffectCraft',
-        'plugin_note':'Analyze any .aex. Pixel Sorter 2 and Deep Glow have independent, working WASM ports; other effects get diagnostics, never a substituted plug-in. The DLL is not run; AE visual parity is unverified.',
+        'plugin_note':'Analyze any .aex: PiPL exposes identity, not rendering or controls. An optional AE-host profile adds verified bounds, groups and keyframe support to the report. Only Pixel Sorter 2 and Deep Glow have independent WASM ports.',
         'plugin_input':'After Effects .aex plug-in file', 'plugin_output':'New .wasm effect file',
+        'plugin_profile':'AE parameter profile .json (optional)',
+        'plugin_profile_choose':'Select the profile exported inside After Effects',
+        'plugin_profile_filter':'AE profile (*.json);;All files (*)',
+        'plugin_profile_hint':'Export with tools/export_ae_effect_metadata.jsx inside AE; a profile does not create a WASM for an unknown effect.',
         'plugin_choose':'Choose an After Effects .aex plug-in',
         'plugin_filter':'Adobe plug-ins (*.aex *.aex.txt);;All files (*)',
         'plugin_save':'Save independent EffectCraft plug-in',
@@ -374,6 +382,12 @@ class AexConverterPanel(FileConverterPanel):
 
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent, language)
+        self.profile_edit, self.profile_btn = self.file_row(self.source_layout)
+        self.profile_btn.clicked.connect(self.choose_profile)
+        self.profile_hint = QLabel()
+        self.profile_hint.setObjectName('muted')
+        self.profile_hint.setWordWrap(True)
+        self.source_layout.addWidget(self.profile_hint)
         self.retranslate()
 
     def retranslate(self):
@@ -384,6 +398,9 @@ class AexConverterPanel(FileConverterPanel):
         self.status_label.setText(tr(self.language, self.last_status[0], **self.last_status[1]))
         self.input_edit.setPlaceholderText(tr(self.language, 'plugin_input'))
         self.input_btn.setText(tr(self.language, 'shortcut_file'))
+        self.profile_edit.setPlaceholderText(tr(self.language, 'plugin_profile'))
+        self.profile_btn.setText(tr(self.language, 'shortcut_file'))
+        self.profile_hint.setText(tr(self.language, 'plugin_profile_hint'))
         self.output_edit.setPlaceholderText(tr(self.language, 'plugin_output'))
         self.output_btn.setText(tr(self.language, 'save_as'))
         self.run_btn.setText(tr(self.language, 'plugin_convert'))
@@ -395,6 +412,7 @@ class AexConverterPanel(FileConverterPanel):
         if not path:
             return
         self.input_edit.setText(path)
+        self.profile_edit.clear()  # A profile for a previous DLL must not be reused.
         source = Path(path)
         stem = output_stem(source) + '_effectcraft'
         n = 1
@@ -407,6 +425,14 @@ class AexConverterPanel(FileConverterPanel):
                 break
             n += 1
         self.output_edit.setText(str(output))
+
+    def choose_profile(self):
+        current = str(Path(self.input_edit.text().strip()).parent) if self.input_edit.text().strip() else ''
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr(self.language, 'plugin_profile_choose'), current,
+            tr(self.language, 'plugin_profile_filter'))
+        if path:
+            self.profile_edit.setText(path)
 
     def choose_output(self):
         current = self.output_edit.text().strip() or str(Path.home())
@@ -432,7 +458,9 @@ class AexConverterPanel(FileConverterPanel):
         output = Path(raw_output)
         try:
             family = inspect_aex(source).family
-            report = convert_aex(source, output, language=self.language)
+            profile_text = self.profile_edit.text().strip()
+            report = convert_aex(source, output, language=self.language,
+                                 ae_profile=Path(profile_text) if profile_text else None)
             self.set_status('done', name=output.name)
             summary_key = 'plugin_glow_summary' if family == 'deep_glow' else 'plugin_pixel_summary'
             QMessageBox.information(

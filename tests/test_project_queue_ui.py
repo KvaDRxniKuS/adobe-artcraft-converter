@@ -19,7 +19,8 @@ else:
 
 from craft_converter.project_import import FC_TO_PR, PR_TO_FC
 from test_reverse_writer import REFERENCE, SHELL
-from test_aex_to_effectcraft import sample_aex, sample_deep_glow
+from test_aex_to_effectcraft import (sample_aex, sample_deep_glow,
+                                    sample_profile, sample_with_pipl)
 from craft_converter.effectcraft_deep_glow import WASM as GLOW_WASM
 
 
@@ -227,6 +228,32 @@ class MixedQueueUITests(unittest.TestCase):
         self.assertFalse(unknown.exists())
         self.assertTrue(unknown.with_name(unknown.stem + '_aex_analysis.md').is_file())
         self.assertEqual(self.window.files, [])
+
+    def test_plugins_tab_accepts_optional_ae_inventory_without_reusing_stale_profile(self):
+        from PySide6.QtWidgets import QFileDialog
+        panel = self.window.plugin_panel
+        self.assertIs(panel.profile_edit.parent(), panel.source_panel)
+        source = self.source.with_name('Deep Glow.aex.txt')
+        source.write_bytes(sample_with_pipl(sample_deep_glow(), 'Deep Glow', 'Stylize', 'PEDG'))
+        profile = self.source.with_name('effect_metadata.json')
+        profile.write_text(json.dumps(sample_profile('Deep Glow', 'PEDG')), encoding='utf-8')
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
+            panel.choose_input()
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(profile), '')):
+            panel.choose_profile()
+        self.assertEqual(panel.profile_edit.text(), str(profile))
+        output = Path(panel.output_edit.text())
+        with patch.object(QMessageBox, 'information') as info, \
+             patch.object(QMessageBox, 'critical') as error:
+            panel.convert()
+            error.assert_not_called()
+            info.assert_called_once()
+        report = output.with_name(output.stem + '_conversion_report.md').read_text(encoding='utf-8')
+        self.assertIn('Glow › Main › Radius', report)
+        self.assertIn('PiPL', report)
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
+            panel.choose_input()
+        self.assertFalse(panel.profile_edit.text())
 
     def test_hotkeys_tab_converts_kys_and_json_without_extra_window(self):
         from PySide6.QtWidgets import QFileDialog
