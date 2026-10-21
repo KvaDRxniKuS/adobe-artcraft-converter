@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from aex_to_effectcraft import convert_aex, inspect_aex
+from craft_converter.deep_glow_defaults import padded_manifest
 from craft_converter.effectcraft_deep_glow import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,10 +24,11 @@ class DeepGlowTests(unittest.TestCase):
         self.assertEqual(WASM, (ROOT / 'effectcraft_plugins/DeepGlow_EffectCraft.wasm').read_bytes())
         self.assertEqual(MANIFEST, json.loads(
             (ROOT / 'effectcraft_plugins/deep_glow_manifest.json').read_text(encoding='utf-8')))
-        packed = json.dumps(MANIFEST, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        packed = padded_manifest(MANIFEST)
         self.assertEqual(hashlib.sha256(packed).hexdigest(), MANIFEST_SHA256)
+        self.assertEqual(WASM.count(packed), 1)
         self.assertEqual(MANIFEST['api'], 1)
-        self.assertEqual(MANIFEST['version'], '0.3.0')
+        self.assertEqual(MANIFEST['version'], '0.4.0')
         radius = next(p for p in MANIFEST['params'] if p['id'] == 'radius')
         self.assertEqual(radius['sliderMax'], 256)
         self.assertGreater(radius['max'], radius['sliderMax'])

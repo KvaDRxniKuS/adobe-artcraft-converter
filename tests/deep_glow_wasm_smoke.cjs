@@ -15,8 +15,12 @@ const manifest = JSON.parse(Buffer.from(instance.memory.buffer,
   instance.ec_manifest_ptr(), instance.ec_manifest_len()).toString('utf8'));
 assert.equal(manifest.id, 'org.artcraft_converter.deep_glow');
 assert.equal(manifest.api, 1);
-assert.equal(manifest.version, '0.3.0');
+assert.equal(manifest.version, '0.4.0');
 assert.equal(manifest.params.length, 14);
+const rawManifest = Buffer.from(instance.memory.buffer, instance.ec_manifest_ptr(),
+  instance.ec_manifest_len()).toString('utf8');
+assert.match(rawManifest, /"default":48 +,/,
+  'fixed-width manifest slots allow explicitly exported AE defaults');
 const index = Object.fromEntries(manifest.params.map((p, n) => [p.id, n]));
 
 function render(pixels, width, height, overrides = {}, scale = 1, time = 0) {
@@ -46,6 +50,18 @@ function impulse(w, h, x, y, rgba = [1, 1, 1, 1]) {
   const pixels = Array.from({length: w * h}, () => [0, 0, 0, 0]);
   pixels[y * w + x] = rgba;
   return pixels;
+}
+
+// EffectCraft's Grow Bounds prepends a transparent border. With that host
+// effect BEFORE the WASM, pixels beyond the original footage can receive light.
+const pad = 12, sw = 5, sh = 5, aw = sw + 2 * pad, ah = sh + 2 * pad;
+const padded = impulse(aw, ah, pad + sw - 1, pad + 2);
+const bounded = render(padded, aw, ah, {radius: 16, exposure: 0, threshold: 50,
+  threshold_smooth: 0, spread: 65, quality: 2});
+for (const dx of [1, 2, 5]) {
+  const outside = bounded[(pad + 2) * aw + pad + sw - 1 + dx];
+  assert.ok(outside[0] > 0 && outside[3] > 0,
+    `transparent region ${dx}px beyond footage must glow when the host pads it`);
 }
 
 const w = 19, h = 19, cx = 9, cy = 9;

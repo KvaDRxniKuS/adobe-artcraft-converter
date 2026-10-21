@@ -22,7 +22,7 @@ else:
 from craft_converter.project_import import FC_TO_PR, PR_TO_FC
 from test_reverse_writer import REFERENCE, SHELL
 from test_aex_to_effectcraft import (sample_aex, sample_deep_glow,
-                                    sample_profile, sample_with_pipl)
+                                    sample_profile, sample_values, sample_with_pipl)
 from craft_converter.effectcraft_deep_glow import WASM as GLOW_WASM
 
 
@@ -254,6 +254,12 @@ class MixedQueueUITests(unittest.TestCase):
             self.drop_files(panel.profile_edit, [profile])
             warning.assert_not_called()
         self.assertEqual(panel.profile_edit.text(), str(profile))
+        values = self.source.with_name('ae_values.json')
+        values.write_text(json.dumps(sample_values()), encoding='utf-8')
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(panel.values_edit, [values])
+            warning.assert_not_called()
+        self.assertEqual(panel.values_edit.text(), str(values))
         self.assertFalse(Path(panel.output_edit.text()).exists())
         self.assertEqual(len(self.window.files), 2)  # No drop leaked into another tab.
 
@@ -375,6 +381,7 @@ class MixedQueueUITests(unittest.TestCase):
         from PySide6.QtWidgets import QFileDialog
         panel = self.window.plugin_panel
         self.assertIs(panel.profile_edit.parent(), panel.source_panel)
+        self.assertIs(panel.values_edit.parent(), panel.source_panel)
         source = self.source.with_name('Deep Glow.aex.txt')
         source.write_bytes(sample_with_pipl(sample_deep_glow(), 'Deep Glow', 'Stylize', 'PEDG'))
         profile = self.source.with_name('effect_metadata.json')
@@ -384,6 +391,11 @@ class MixedQueueUITests(unittest.TestCase):
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(profile), '')):
             panel.choose_profile()
         self.assertEqual(panel.profile_edit.text(), str(profile))
+        values = self.source.with_name('effect_values.json')
+        values.write_text(json.dumps(sample_values()), encoding='utf-8')
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(values), '')):
+            panel.choose_values()
+        self.assertEqual(panel.values_edit.text(), str(values))
         output = Path(panel.output_edit.text())
         with patch.object(QMessageBox, 'information') as info, \
              patch.object(QMessageBox, 'critical') as error:
@@ -392,10 +404,14 @@ class MixedQueueUITests(unittest.TestCase):
             info.assert_called_once()
         report = output.with_name(output.stem + '_conversion_report.md').read_text(encoding='utf-8')
         self.assertIn('Glow › Main › Radius', report)
+        self.assertIn('`radius` = 512', report)
         self.assertIn('PiPL', report)
+        self.assertNotEqual(output.read_bytes(), GLOW_WASM)
+        self.assertTrue(output.with_name(output.stem + '_apply_with_bounds.jsx').is_file())
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
             panel.choose_input()
         self.assertFalse(panel.profile_edit.text())
+        self.assertFalse(panel.values_edit.text())
 
     def test_hotkeys_tab_converts_kys_and_json_without_extra_window(self):
         from PySide6.QtWidgets import QFileDialog

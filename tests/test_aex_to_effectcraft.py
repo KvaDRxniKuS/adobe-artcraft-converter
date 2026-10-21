@@ -12,8 +12,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from aex_to_effectcraft import (UnsupportedAexError, convert_aex, inspect_aex,
-                                main, output_stem)
+from aex_to_effectcraft import (UnsupportedAexError, bounds_script_path, convert_aex,
+                                inspect_aex, main, output_stem)
+from craft_converter.deep_glow_bounds import SCRIPT as BOUNDS_SCRIPT
+from craft_converter.deep_glow_defaults import customized_wasm, padded_manifest
 from craft_converter.effectcraft_pixel_sorter import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
 from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, MANIFEST_SHA256 as GLOW_MANIFEST_SHA256,
                                    WASM as GLOW_WASM, WASM_SHA256 as GLOW_SHA256)
@@ -68,6 +70,21 @@ def sample_profile(effect_name='Novel Glow', match_name='vendor.novel') -> dict:
             'can_vary_over_time': True, 'can_set_expression': False,
             'ui_control': 'unknown',
         }],
+    }
+
+
+def sample_values(match_name='PEDG') -> dict:
+    return {
+        'format': 'artcraft.ae-effect-values', 'version': 1,
+        'effect_name': 'Deep Glow 2', 'effect_match_name': match_name,
+        'properties': [
+            {'name': name, 'match_name': f'PEDG-{i:04d}', 'groups': ['Glow'],
+             'value_type': 'scalar', 'value': value}
+            for i, (name, value) in enumerate((
+                ('Radius', 512), ('Exposure', 2.5), ('Threshold', 42),
+                ('Threshold Smooth', 30), ('Spread', 72),
+                ('Source Opacity', 84), ('Blend Mode', 1), ('Mix', 55)))
+        ],
     }
 
 
@@ -166,6 +183,85 @@ class AexTests(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), GLOW_WASM)
         self.assertIn('Glow › Main › Radius', report.read_text(encoding='utf-8'))
 
+    def test_ae_numeric_snapshot_changes_only_known_deep_glow_defaults(self):
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(),
+                                                 'Deep Glow', 'Stylize', 'PEDG'))
+        snapshot = self.base / 'deep_glow_values.json'
+        snapshot.write_text(json.dumps(sample_values()), encoding='utf-8')
+        report = convert_aex(self.source, self.output, language='en', ae_values=snapshot)
+        wasm = self.output.read_bytes()
+        self.assertNotEqual(wasm, GLOW_WASM)
+        self.assertEqual(len(wasm), len(GLOW_WASM))
+        self.assertTrue(wasm.startswith(b'\0asm'))
+        expected = {'radius': 512, 'exposure': 2.5, 'threshold': 42,
+                    'threshold_smooth': 30, 'spread': 72, 'source_opacity': 84}
+        patched, manifest = customized_wasm(GLOW_WASM, GLOW_MANIFEST, expected)
+        self.assertEqual(wasm, patched)
+        self.assertIn(padded_manifest(manifest), wasm)
+        self.assertNotIn(padded_manifest(GLOW_MANIFEST), wasm)
+        self.assertEqual([p['default'] for p in GLOW_MANIFEST['params'][:2]], [48, 1.5])
+        self.assertEqual(bounds_script_path(self.output).read_text(encoding='utf-8'), BOUNDS_SCRIPT)
+        text = report.read_text(encoding='utf-8')
+        self.assertIn('`radius` = 512', text)
+        self.assertIn('`threshold_smooth` = 30', text)
+        self.assertIn('Blend Mode: no verified one-to-one port control', text)
+        self.assertIn('Factory defaults only if the effect was freshly added', text)
+        self.assertIn('grow', text.lower())
+        self.assertIn(hashlib.sha256(wasm).hexdigest(), text)
+
+    def test_invalid_snapshot_is_rejected_without_writing_any_result(self):
+        self.source.write_bytes(sample_with_pipl(sample_deep_glow(),
+                                                 'Deep Glow', 'Stylize', 'PEDG'))
+        snapshot = self.base / 'snapshot.json'
+        examples = [
+            (sample_profile('Deep Glow', 'PEDG'), 'Unknown AE settings snapshot format'),
+            ({**sample_values(), 'project_path': 'private.aep'}, 'Unexpected AE settings fields'),
+            (sample_values('another.plugin'), 'not from Deep Glow'),
+        ]
+        for payload, message in examples:
+            with self.subTest(message=message):
+                snapshot.write_text(json.dumps(payload), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, message):
+                    convert_aex(self.source, self.output, ae_values=snapshot)
+                self.assertFalse(self.output.exists())
+                self.assertFalse(bounds_script_path(self.output).exists())
+        payload = sample_values()
+        payload['properties'][0]['value'] = float('nan')
+        snapshot.write_text(json.dumps(payload), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'numeric value'):
+            convert_aex(self.source, self.output, ae_values=snapshot)
+        self.assertFalse(self.output.exists())
+
+    def test_wasm_manifest_patch_rejects_unreserved_or_bad_defaults(self):
+        for overrides, message in (
+            ({'unknown': 1}, 'Unknown Deep Glow parameter'),
+            ({'radius': -1}, 'outside the port range'),
+            ({'radius': True}, 'finite number'),
+            ({'radius': 10 ** 1000}, 'finite number'),
+            ({'quality': 7}, 'valid popup index'),
+            ({'expand_alpha': 1}, 'must be boolean'),
+        ):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, message):
+                customized_wasm(GLOW_WASM, GLOW_MANIFEST, overrides)
+        with self.assertRaisesRegex(RuntimeError, 'layout'):
+            customized_wasm(b'\0asm' + b'not our compiled module', GLOW_MANIFEST,
+                            {'radius': 11})
+
+    def test_settings_out_of_range_or_ambiguous_are_not_silently_clamped(self):
+        self.source.write_bytes(sample_deep_glow())
+        snapshot = self.base / 'snapshot.json'
+        data = sample_values()
+        data['properties'][0]['value'] = 2e9  # Larger than the port's finite API max.
+        data['properties'].append({**data['properties'][1], 'match_name': 'PEDG-other'})
+        snapshot.write_text(json.dumps(data), encoding='utf-8')
+        report = convert_aex(self.source, self.output, language='en', ae_values=snapshot)
+        self.assertIn('outside the port range', report.read_text(encoding='utf-8'))
+        self.assertIn('ambiguous source value', report.read_text(encoding='utf-8'))
+        _, manifest = customized_wasm(GLOW_WASM, GLOW_MANIFEST,
+                                      {'threshold': 42, 'threshold_smooth': 30,
+                                       'spread': 72, 'source_opacity': 84})
+        self.assertIn(padded_manifest(manifest), self.output.read_bytes())
+
     def test_ae_profile_without_pipl_does_not_claim_a_cross_check(self):
         # The AE script can inventory an effect even when a PiPL is absent or
         # inaccessible; never turn missing evidence into a false mismatch.
@@ -247,6 +343,8 @@ class AexTests(unittest.TestCase):
         self.assertIn('16 times the longest frame dimension', report_text)
         self.assertIn('Quit EffectCraft', report_text)
         self.assertIn('NOT the original', report_text)
+        self.assertIn('The WASM alone cannot draw outside the source footage rectangle', report_text)
+        self.assertEqual(bounds_script_path(self.output).read_text(encoding='utf-8'), BOUNDS_SCRIPT)
         self.assertNotIn(b'Deep Glow 2\0', self.output.read_bytes())
 
     def test_unknown_effect_is_analyzed_without_faking_a_wasm(self):
@@ -304,6 +402,16 @@ class AexTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             convert_aex(self.source, self.base / 'wrong.txt')
 
+    def test_deep_glow_script_collision_prevents_partial_result(self):
+        self.source.write_bytes(sample_deep_glow())
+        script = bounds_script_path(self.output)
+        script.write_text('Do not overwrite', encoding='utf-8')
+        with self.assertRaises(FileExistsError):
+            convert_aex(self.source, self.output)
+        self.assertEqual(script.read_text(encoding='utf-8'), 'Do not overwrite')
+        self.assertFalse(self.output.exists())
+        self.assertFalse(self.output.with_name(self.output.stem + '_conversion_report.md').exists())
+
     def test_unknown_does_not_overwrite_existing_analysis_or_output(self):
         self.source.write_bytes(sample_aex().replace(b'GG AEPixelSorter2', b'YY AEPixelSorter2'))
         report = self.output.with_name(self.output.stem + '_aex_analysis.md')
@@ -335,6 +443,15 @@ class AexTests(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), WASM)
         self.assertTrue(self.base.joinpath('Sample_effectcraft_conversion_report.md').is_file())
 
+    def test_cli_accepts_explicit_ae_snapshot_for_deep_glow(self):
+        self.source.write_bytes(sample_deep_glow())
+        values = self.base / 'ae_values.json'
+        values.write_text(json.dumps(sample_values()), encoding='utf-8')
+        self.assertEqual(main([str(self.source), str(self.output), '--language', 'en',
+                               '--ae-values', str(values)]), 0)
+        self.assertNotEqual(self.output.read_bytes(), GLOW_WASM)
+        self.assertTrue(bounds_script_path(self.output).is_file())
+
     def test_embedded_asset_matches_build_source_and_deliverable(self):
         self.assertEqual(hashlib.sha256(WASM).hexdigest(), WASM_SHA256)
         meta = json.dumps(MANIFEST, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
@@ -343,6 +460,15 @@ class AexTests(unittest.TestCase):
             (ROOT / 'effectcraft_plugins/pixel_sorter_manifest.json').read_text(encoding='utf-8')))
         binary = ROOT / 'effectcraft_plugins/PixelSorter_EffectCraft.wasm'
         self.assertEqual(WASM, binary.read_bytes())
+
+    def test_glow_embedded_asset_has_reserved_defaults_and_matches_builder_manifest(self):
+        self.assertEqual(hashlib.sha256(GLOW_WASM).hexdigest(), GLOW_SHA256)
+        meta = padded_manifest(GLOW_MANIFEST)
+        self.assertEqual(hashlib.sha256(meta).hexdigest(), GLOW_MANIFEST_SHA256)
+        self.assertEqual(GLOW_WASM.count(meta), 1)
+        self.assertEqual(GLOW_MANIFEST, json.loads(
+            (ROOT / 'effectcraft_plugins/deep_glow_manifest.json').read_text(encoding='utf-8')))
+        self.assertEqual(GLOW_WASM, (ROOT / 'effectcraft_plugins/DeepGlow_EffectCraft.wasm').read_bytes())
 
     def test_manifest_matches_effectcraft_plugin_api_v1_parameter_schema(self):
         self.assertEqual(MANIFEST['api'], 1)
@@ -368,6 +494,29 @@ class AexTests(unittest.TestCase):
     def test_ae_host_script_exports_only_observable_metadata_in_a_mock(self):
         completed = subprocess.run(['node', str(ROOT / 'tests/ae_metadata_script_smoke.cjs')],
                                    cwd=ROOT, capture_output=True, text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn('PASS', completed.stdout)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node.js needed for simulated host tests')
+    def test_ae_settings_and_effectcraft_bounds_scripts_in_host_mocks(self):
+        for name in ('ae_values_script_smoke.cjs', 'deep_glow_bounds_script_smoke.cjs'):
+            with self.subTest(script=name):
+                completed = subprocess.run(['node', str(ROOT / 'tests' / name)],
+                                           cwd=ROOT, capture_output=True, text=True, timeout=20)
+                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                self.assertIn('PASS', completed.stdout)
+        self.assertEqual((ROOT / 'effectcraft_plugins/ApplyDeepGlowWithBounds.jsx').read_text(
+            encoding='utf-8'), BOUNDS_SCRIPT)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node.js needed for customized WASM test')
+    def test_converter_patched_wasm_executes_in_webassembly_runtime(self):
+        self.source.write_bytes(sample_deep_glow())
+        snapshot = self.base / 'snapshot.json'
+        snapshot.write_text(json.dumps(sample_values()), encoding='utf-8')
+        convert_aex(self.source, self.output, ae_values=snapshot)
+        completed = subprocess.run(['node', str(ROOT / 'tests/deep_glow_custom_defaults_smoke.cjs'),
+                                    str(self.output)], cwd=ROOT, capture_output=True, text=True,
+                                   timeout=20)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn('PASS', completed.stdout)
 

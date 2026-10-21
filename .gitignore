@@ -3,6 +3,7 @@
 *.fcproj
 *.prproj
 *_conversion_report.md
+*_apply_with_bounds.jsx
 *_aex_analysis.md
 *_shortcuts_report.md
 # Generated effect binaries are local except the small, ready-to-load examples.

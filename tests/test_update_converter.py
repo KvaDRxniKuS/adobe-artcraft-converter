@@ -171,16 +171,17 @@ class UpdaterTests(unittest.TestCase):
                      'effectcraft_deep_glow.py'):
             self.assertFalse((output / name).exists(), name)
             self.assertTrue((output / 'craft_converter' / name).is_file(), name)
-        # Embedded WASM is shipped as Python data; the allowlisted AE script
-        # is the sole file in tools (no binary build products or .aex inputs).
+        # Embedded WASM is shipped as Python data; only allowlisted AE-host
+        # scripts enter tools (no binary build products or .aex inputs).
         for name in ('effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py'):
             self.assertEqual((output / 'craft_converter' / name).read_bytes(),
                              (repository / 'craft_converter' / name).read_bytes())
         self.assertFalse((output / 'effectcraft_plugins').exists())
-        self.assertEqual([p.name for p in (output / 'tools').iterdir()],
-                         ['export_ae_effect_metadata.jsx'])
-        self.assertEqual((output / 'tools/export_ae_effect_metadata.jsx').read_bytes(),
-                         (repository / 'tools/export_ae_effect_metadata.jsx').read_bytes())
+        self.assertEqual(sorted(p.name for p in (output / 'tools').iterdir()),
+                         ['export_ae_deep_glow_values.jsx', 'export_ae_effect_metadata.jsx'])
+        for name in ('export_ae_effect_metadata.jsx', 'export_ae_deep_glow_values.jsx'):
+            self.assertEqual((output / 'tools' / name).read_bytes(),
+                             (repository / 'tools' / name).read_bytes())
         self.assertFalse((output / 'FilmCraft_Shortcuts_Template.json').exists())
         self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))
         self.assertIn('flatbuffers', (output / 'requirements.txt').read_text(encoding='utf-8'))

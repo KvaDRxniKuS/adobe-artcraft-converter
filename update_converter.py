@@ -36,7 +36,9 @@ ROOT_ENTRY_POINTS = frozenset({
 })
 CORE_MODULES = frozenset({
     'craft_converter/__init__.py', 'craft_converter/aex_metadata.py',
-    'craft_converter/ae_profile.py', 'craft_converter/direct_fc_to_prproj.py',
+    'craft_converter/ae_profile.py', 'craft_converter/ae_values.py',
+    'craft_converter/deep_glow_bounds.py', 'craft_converter/deep_glow_defaults.py',
+    'craft_converter/direct_fc_to_prproj.py',
     'craft_converter/project_import.py', 'craft_converter/reverse_project.py',
     'craft_converter/graphic_raster.py', 'craft_converter/premiere_seed.py',
     'craft_converter/premiere_text.py', 'craft_converter/premiere_text_seed.py',
@@ -47,9 +49,10 @@ SHORTCUT_TEMPLATES = frozenset({
     'resources/shortcuts/FilmCraft_Shortcuts_Template.json',
     'resources/shortcuts/Premiere_Shortcuts_Template.kys',
 })
-# Script source needed for the optional AE-host metadata workflow. Do not
-# download build tools or other arbitrary files from the tools directory.
-AE_HOST_SCRIPTS = frozenset({'tools/export_ae_effect_metadata.jsx'})
+# AE-host metadata and opt-in numeric snapshot scripts. Do not download build
+# tools or arbitrary files from the tools directory.
+AE_HOST_SCRIPTS = frozenset({'tools/export_ae_effect_metadata.jsx',
+                             'tools/export_ae_deep_glow_values.jsx'})
 REQUIRED_FILES = (ROOT_ENTRY_POINTS | CORE_MODULES | SHORTCUT_TEMPLATES |
                   AE_HOST_SCRIPTS | {'requirements.txt'})
 MAX_BRANCHES = 40  # Unauthenticated GitHub API calls are limited to 60 per hour.
@@ -211,8 +214,8 @@ def unpack_source(archive: Path, destination: Path) -> None:
                 raise UpdateError('Unsafe archive path')
             relative = '/'.join(parts[1:])
             # No arbitrary directories: tests, build tools, user data and WASM
-            # builds never enter the source-only cache. The sole AE-host JSX
-            # script is allowed explicitly; embedded effects travel in Python.
+            # builds never enter the source-only cache. Only allowlisted AE-host
+            # JSX scripts are included; embedded effects travel in Python.
             if len(parts) == 2:
                 selected = SAFE_PY_NAME.fullmatch(parts[1]) or relative == 'requirements.txt'
             elif len(parts) == 3 and parts[1] == 'craft_converter':

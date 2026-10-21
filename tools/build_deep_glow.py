@@ -12,11 +12,15 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from craft_converter.deep_glow_defaults import padded_manifest  # noqa: E402
+
 MANIFEST = ROOT / 'effectcraft_plugins/deep_glow_manifest.json'
 TEMPLATE = ROOT / 'effectcraft_plugins/deep_glow.ts.in'
 WASM_FILE = ROOT / 'effectcraft_plugins/DeepGlow_EffectCraft.wasm'
@@ -30,7 +34,7 @@ def build(compiler: str) -> None:
             or len(params) != 14 or len({p['id'] for p in params}) != 14):
         raise ValueError('Unexpected Deep Glow plug-in manifest.')
     compact = json.dumps(manifest, separators=(',', ':'), ensure_ascii=False)
-    meta = compact.encode('utf-8')
+    meta = padded_manifest(manifest)
     if len(meta) >= 60_000:
         raise ValueError('Manifest would overlap the host buffer.')
     source = TEMPLATE.read_text(encoding='utf-8')
@@ -57,7 +61,7 @@ if(!e[n])throw Error('Missing '+n);
 if(e.ec_api_version()!==1)throw Error('Wrong API version');
 const manifest=Buffer.from(e.memory.buffer,e.ec_manifest_ptr(),e.ec_manifest_len()).toString('utf8');
 if(manifest!==process.argv[2])throw Error('Manifest mismatch');'''
-            subprocess.run(['node', '-e', check, str(wasm), compact], check=True)
+            subprocess.run(['node', '-e', check, str(wasm), meta.decode('utf-8')], check=True)
     encoded = base64.b64encode(payload).decode('ascii')
     lines = '\n'.join(f'    {line!r}' for line in textwrap.wrap(encoded, 100))
     body = ('"""Independent multi-scale glow effect for EffectCraft (API v1).\n\n'

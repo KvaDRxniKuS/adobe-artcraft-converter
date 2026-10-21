@@ -17,6 +17,9 @@ from pathlib import Path
 
 from craft_converter.aex_metadata import AEEffectIdentity, read_pipl_identities
 from craft_converter.ae_profile import load_ae_profile, profile_report
+from craft_converter.ae_values import load_ae_settings, select_deep_glow_defaults, settings_report
+from craft_converter.deep_glow_bounds import SCRIPT as BOUNDS_SCRIPT
+from craft_converter.deep_glow_defaults import customized_wasm
 from craft_converter.effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
 from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
                                    WASM_SHA256 as GLOW_SHA256)
@@ -222,6 +225,11 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
             'Понадобится отдельная реализация WASM и проверка её работы.\n')
 
 
+def bounds_script_path(output: Path) -> Path:
+    """Companion script for applying Grow Bounds before Deep Glow."""
+    return output.with_name(output.stem + '_apply_with_bounds.jsx')
+
+
 def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
                           language: str = 'ru') -> str:
     stamp = dt.datetime.fromtimestamp(info.pe_timestamp, tz=dt.timezone.utc).strftime('%Y-%m-%d')
@@ -253,6 +261,16 @@ def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
                 'or curve widgets), but ordinary plug-in properties can be keyframed. '
                 'No paired After Effects reference frames were supplied: '
                 'visual parity is unverified.\n\n'
+                '**Footage bounds:** API v1 renders an in-place frame no larger than its input. '
+                'The WASM alone cannot draw outside the source footage rectangle. Use the '
+                f'companion `{bounds_script_path(output).name}` in EffectCraft (File → Scripts '
+                '→ Run Script File…) after loading the WASM: select footage layer(s), and it '
+                'inserts built-in Grow Bounds BEFORE Deep Glow. The padding follows Radius '
+                'with an expression. Applying the plug-in directly still clips at the source '
+                'edge. For very large layers/radii, the 4,000-pixel host setting and this '
+                'port’s 9M-pixel render budget can still limit expansion; use a smaller '
+                'source/comp-sized precomp or a host change. The script has not been tested '
+                'in the EffectCraft desktop UI.\n\n'
                 'Quit EffectCraft before replacing the earlier port: plug-ins with the '
                 'same effect id cannot be loaded twice in one session. Keep only the new '
                 'version in any auto-load folder, restart EffectCraft desktop and use '
@@ -285,6 +303,17 @@ def deep_glow_report_text(source: Path, output: Path, info: AexDetails,
             'плагина плоские (без вложенных групп и редактора кривой), но обычные '
             'параметры поддерживают ключевые кадры. Парных эталонных кадров AE нет: '
             'совпадение не подтверждено.\n\n'
+            '**Границы футажа:** WASM API v1 работает в исходном буфере и сам НЕ может '
+            'расширить слой. Для ореола за пределами исходника после загрузки WASM '
+            'выберите слой(и) и запустите в EffectCraft через File → Scripts → '
+            f'Run Script File… файл `{bounds_script_path(output).name}`. Он ставит штатный '
+            'Grow Bounds ПЕРЕД Deep Glow и привязывает его размер к Radius выражением. '
+            'Если добавить один только WASM через меню эффектов, граница останется. '
+            'Для больших исходников и радиусов расширение может ограничиваться '
+            'диапазоном Grow Bounds (4000 px) и бюджетом порта (9 млн пикселей); '
+            'может понадобиться меньший исходник/прекомпозиция размером с композицию '
+            'или изменение самого EffectCraft. Скрипт не проверен в реальном '
+            'настольном EffectCraft.\n\n'
             'Перед заменой старой версии закройте EffectCraft: два плагина с одним ID '
             'нельзя загрузить в одной сессии. Оставьте в папке автозагрузки только новый '
             'файл, перезапустите EffectCraft и выберите Effect → Load Effect Plug-in… → '
@@ -345,23 +374,29 @@ def report_text(source: Path, output: Path, info: AexDetails, language: str = 'r
 
 
 def convert_aex(source: Path, output: Path, *, language: str = 'ru',
-                ae_profile: Path | None = None) -> Path:
-    """Convert known ports; optional AE-host metadata is diagnostic only."""
+                ae_profile: Path | None = None, ae_values: Path | None = None) -> Path:
+    """Export implemented ports; AE metadata and numeric settings are separate opt-ins."""
     source, output = Path(source), Path(output)
     ae_profile = Path(ae_profile) if ae_profile is not None else None
+    ae_values = Path(ae_values) if ae_values is not None else None
     if output.suffix.lower() != '.wasm':
         raise ValueError('Результат должен иметь расширение .wasm.')
     conversion_report = output.with_name(output.stem + '_conversion_report.md')
     analysis_report = output.with_name(output.stem + '_aex_analysis.md')
+    script = bounds_script_path(output)
     if any(same_file(candidate, original)
-           for candidate in (output, conversion_report, analysis_report)
-           for original in (source, ae_profile) if original is not None):
+           for candidate in (output, conversion_report, analysis_report, script)
+           for original in (source, ae_profile, ae_values) if original is not None):
         raise ValueError('Результат не должен перезаписывать исходный .aex или профиль AE.')
     info = inspect_aex(source)
     report = conversion_report if info.family in _PORTS else analysis_report
-    if output.exists() or report.exists():
-        raise FileExistsError('Файл результата или отчёта уже существует; выберите другое имя.')
+    script = script if info.family == 'deep_glow' else None
+    if output.exists() or report.exists() or (script is not None and script.exists()):
+        raise FileExistsError('Файл результата, отчёта или скрипта уже существует; выберите другое имя.')
     profile = load_ae_profile(ae_profile, info.pipl_effects) if ae_profile else None
+    if ae_values and info.family != 'deep_glow':
+        raise ValueError('Снимок числовых значений AE поддерживается только для Deep Glow.')
+    settings = load_ae_settings(ae_values, info.pipl_effects) if ae_values else None
     output.parent.mkdir(parents=True, exist_ok=True)
     if info.family not in _PORTS:
         # No renamed PE and no unrelated/stub effect: the report is a real
@@ -383,9 +418,18 @@ def convert_aex(source: Path, output: Path, *, language: str = 'ru',
     manifest, wasm, digest = _PORTS[info.family]
     if hashlib.sha256(wasm).hexdigest() != digest or manifest.get('api') != 1:
         raise RuntimeError('Встроенный EffectCraft WASM повреждён; конвертация прервана.')
+    applied = None
+    if settings:
+        applied = select_deep_glow_defaults(settings, manifest)
+        wasm, manifest = customized_wasm(wasm, manifest, applied.defaults)
     text = report_text(source, output, info, language)
     if profile:
         text += '\n' + profile_report(profile, language)
+    if settings:
+        text += '\n' + settings_report(settings, applied, language)
+    if info.family == 'deep_glow':
+        label = 'SHA-256 of produced WASM' if language == 'en' else 'SHA-256 созданного WASM'
+        text += f'\n- {label}: `{hashlib.sha256(wasm).hexdigest()}`\n'
     created = []
     try:
         with output.open('xb') as file:
@@ -394,6 +438,10 @@ def convert_aex(source: Path, output: Path, *, language: str = 'ru',
         with report.open('x', encoding='utf-8') as file:
             created.append(report)
             file.write(text)
+        if script is not None:
+            with script.open('x', encoding='utf-8') as file:
+                created.append(script)
+                file.write(BOUNDS_SCRIPT)
     except BaseException:
         for path in created:
             path.unlink(missing_ok=True)
@@ -417,15 +465,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--language', choices=('ru', 'en'), default='ru')
     parser.add_argument('--ae-profile', type=Path,
                         help='Optional value-free AE-host metadata JSON; reports only, not a renderer')
+    parser.add_argument('--ae-values', type=Path,
+                        help='Optional Deep Glow numeric settings snapshot exported from a selected AE effect')
     args = parser.parse_args(argv)
     output = args.output or args.input.with_name(output_stem(args.input) + '_effectcraft.wasm')
     try:
         report = convert_aex(args.input, output, language=args.language,
-                             ae_profile=args.ae_profile)
+                             ae_profile=args.ae_profile, ae_values=args.ae_values)
     except UnsupportedAexError as exc:
         print(f'Нет независимого порта; WASM не создан. Диагностика: {exc.report}', file=sys.stderr)
         return 2
     print(f'Создано: {output}\nОтчёт: {report}')
+    if inspect_aex(args.input).family == 'deep_glow':
+        print(f'Применение с расширенными границами: {bounds_script_path(output)}')
     return 0
 
 
