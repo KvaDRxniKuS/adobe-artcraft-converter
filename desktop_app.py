@@ -29,8 +29,26 @@ TEXT = {
         'planned_note':'Конвертация «{feature}» для {pair} пока не реализована. Здесь появится инструмент, когда он будет готов; файлы не изменяются.',
         'planned_tooltip':'Пока не реализовано: {feature} · {pair}',
         'source_data':'ИСХОДНЫЕ ДАННЫЕ','target_data':'РЕЗУЛЬТАТ',
-        'planned_source':'Для этого типа данных конвертер пока недоступен.',
+        'planned_source':'Можно выбрать файл для просмотра пути. Конвертация пока не реализована.',
         'planned_target':'Файлы результата не создаются.',
+        'planned_preview':'Выбрано файлов: {n}. Конвертация пока не реализована; исходники не изменены.',
+        'planned_choose':'Выберите файлы (без конвертации)',
+        'all_files_filter':'Все файлы (*)',
+        'planned_input':'Перетащите или выберите исходные файлы',
+        'planned_output':'Результат пока недоступен',
+        'drop_hotkeys_title':'Перетащите .kys или JSON сюда',
+        'drop_hotkeys_note':'Один файл · направление определяется по содержимому',
+        'drop_plugins_title':'Перетащите .aex сюда',
+        'drop_plugins_note':'Один файл · профиль AE можно перетащить в поле ниже',
+        'drop_planned_title':'Перетащите файл сюда',
+        'drop_planned_note':'Можно выбрать файлы; конвертация пока не реализована',
+        'drop_single_title':'Нужен один файл',
+        'drop_single':'На этой вкладке можно выбрать один файл за раз. Ничего не изменено.',
+        'drop_invalid_title':'Не удалось добавить файл',
+        'drop_invalid_file':'Выберите существующий локальный файл, а не папку.',
+        'drop_invalid_hotkeys':'Нужен файл горячих клавиш .kys, .json или .txt.',
+        'drop_invalid_plugin':'Нужен плагин After Effects .aex (также допускается .aex.txt).',
+        'drop_invalid_profile':'Нужен профиль параметров AE в формате .json.',
         'project_heading':'Проекты · Premiere ↔ FilmCraft',
         'project_note':'Добавляйте проекты в общую очередь: направление определяется автоматически. Для FC → PR дополнительные параметры доступны при выборе проекта.',
         'source_projects':'ИСХОДНЫЕ ПРОЕКТЫ',
@@ -99,8 +117,26 @@ TEXT = {
         'planned_note':'Conversion of {feature} for {pair} is not implemented yet. A tool will appear here when support is added; no files are changed.',
         'planned_tooltip':'Not implemented yet: {feature} · {pair}',
         'source_data':'SOURCE DATA','target_data':'RESULT',
-        'planned_source':'Conversion for this data type is not available yet.',
+        'planned_source':'Select a file to preview its path. Conversion is not implemented yet.',
         'planned_target':'No output files are created.',
+        'planned_preview':'{n} file(s) selected. Conversion is not implemented yet; inputs are unchanged.',
+        'planned_choose':'Select files (no conversion)',
+        'all_files_filter':'All files (*)',
+        'planned_input':'Drop or choose input files',
+        'planned_output':'Output is not available yet',
+        'drop_hotkeys_title':'Drop a .kys or JSON here',
+        'drop_hotkeys_note':'One file · direction is detected from its contents',
+        'drop_plugins_title':'Drop an .aex here',
+        'drop_plugins_note':'One file · drop an AE profile on the field below',
+        'drop_planned_title':'Drop a file here',
+        'drop_planned_note':'Files can be selected; conversion is not implemented yet',
+        'drop_single_title':'One file required',
+        'drop_single':'Select one file at a time on this tab. Nothing was changed.',
+        'drop_invalid_title':'Could not add file',
+        'drop_invalid_file':'Choose an existing local file, not a folder.',
+        'drop_invalid_hotkeys':'Choose a .kys, .json or .txt shortcut file.',
+        'drop_invalid_plugin':'Choose an After Effects .aex plug-in (.aex.txt is also accepted).',
+        'drop_invalid_profile':'Choose an AE parameter profile .json file.',
         'project_heading':'Projects · Premiere ↔ FilmCraft',
         'project_note':'Add projects to one queue: direction is detected automatically. Select an FC project to set optional FC → PR parameters.',
         'source_projects':'SOURCE PROJECTS',
@@ -183,20 +219,95 @@ def resource_path(name: str) -> Path:
     return base / 'resources' / 'shortcuts' / name
 
 
+def local_drop_paths(mime) -> list[str]:
+    """Only local file URLs are inputs; never treat dragged web links as paths."""
+    return [url.toLocalFile() for url in mime.urls() if url.isLocalFile() and url.toLocalFile()]
+
+
+def accept_local_drag(event) -> bool:
+    # Always request a copy: dropping a file here must never move its source.
+    if local_drop_paths(event.mimeData()) and event.possibleActions() & Qt.CopyAction:
+        event.setDropAction(Qt.CopyAction)
+        event.accept()
+        return True
+    return False
+
+
+class FileDropLineEdit(QLineEdit):
+    """Route Explorer files through the same handler as the visible drop zone.
+
+    A plain QLineEdit otherwise inserts a file:// URL instead of choosing the
+    input and computing a safe destination.
+    """
+    filesDropped = Signal(list)
+
+    def dragEnterEvent(self, event):
+        if not accept_local_drag(event):
+            if event.mimeData().hasUrls():
+                event.ignore()
+            else:
+                super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if not accept_local_drag(event):
+            if event.mimeData().hasUrls():
+                event.ignore()
+            else:
+                super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if accept_local_drag(event):
+            self.filesDropped.emit(local_drop_paths(event.mimeData()))
+        elif event.mimeData().hasUrls():
+            event.ignore()
+        else:
+            super().dropEvent(event)
+
+
+class FileDropSurface(QWidget):
+    """Catch drops on the page background, not only its outlined target."""
+    filesDropped = Signal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if not accept_local_drag(event):
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if not accept_local_drag(event):
+            event.ignore()
+
+    def dropEvent(self, event):
+        if accept_local_drag(event):
+            self.filesDropped.emit(local_drop_paths(event.mimeData()))
+        else:
+            event.ignore()
+
+
 class FeaturePage(QScrollArea):
-    """Shared structure for every project, hotkey, plug-in and planned subtab.
+    """Shared structure and local-file drop behavior for every subtab.
 
     Each page has the same scrollable header, source/target cards, details area,
     action row and optional footnote. Only the contents of those slots vary.
     """
+    filesDropped = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('featurePage')
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
-        content = QWidget()
+        self.setAcceptDrops(True)
+        self.viewport().setObjectName('featureViewport')
+        self.viewport().setAttribute(Qt.WA_StyledBackground, True)
+        self.viewport().setAcceptDrops(True)
+        content = FileDropSurface()
         content.setObjectName('featureContent')
+        content.setAttribute(Qt.WA_StyledBackground, True)
+        content.filesDropped.connect(self.filesDropped.emit)
         self.root = QVBoxLayout(content)
         self.root.setContentsMargins(18, 18, 18, 18)
         self.root.setSpacing(12)
@@ -224,7 +335,9 @@ class FeaturePage(QScrollArea):
         self.root.addWidget(self.footnote_label)
         self.setWidget(content)
 
-    def _section(self):
+    @staticmethod
+    def card():
+        """Give *all* source, target and detail cards the same visible frame."""
         panel = QFrame()
         panel.setObjectName('panel')
         panel.setFrameShape(QFrame.StyledPanel)
@@ -232,6 +345,10 @@ class FeaturePage(QScrollArea):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(8)
+        return panel, layout
+
+    def _section(self):
+        panel, layout = self.card()
         header = QHBoxLayout()
         title = QLabel()
         title.setObjectName('section')
@@ -249,25 +366,48 @@ class FeaturePage(QScrollArea):
         return panel, title, meta, contents
 
     @staticmethod
-    def file_row(layout):
+    def file_row(layout, on_drop=None):
         row = QHBoxLayout()
-        edit = QLineEdit()
+        edit = FileDropLineEdit() if on_drop else QLineEdit()
+        if on_drop:
+            edit.setAcceptDrops(True)
+            edit.filesDropped.connect(on_drop)
         button = QPushButton()
         row.addWidget(edit, 1)
         row.addWidget(button)
         layout.addLayout(row)
         return edit, button
 
+    def dragEnterEvent(self, event):
+        if not accept_local_drag(event):
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if not accept_local_drag(event):
+            event.ignore()
+
+    def dropEvent(self, event):
+        if accept_local_drag(event):
+            self.filesDropped.emit(local_drop_paths(event.mimeData()))
+        else:
+            event.ignore()
+
 
 class FileConverterPanel(FeaturePage):
-    """Common input/output rows and action/status footer for file converters."""
+    """Shared drop zone, input/output rows and footer for live converters."""
+    drop_kind = 'planned'
 
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent)
         self.language = language
-        self.input_edit, self.input_btn = self.file_row(self.source_layout)
+        self.drop = DropArea(language, kind=self.drop_kind)
+        self.drop.filesDropped.connect(self.accept_files)
+        self.filesDropped.connect(self.accept_files)
+        self.source_layout.addWidget(self.drop)
+        self.input_edit, self.input_btn = self.file_row(self.source_layout, self.accept_files)
         self.input_btn.clicked.connect(self.choose_input)
         self.output_edit, self.output_btn = self.file_row(self.target_layout)
+        self.output_edit.setAcceptDrops(False)
         self.output_btn.clicked.connect(self.choose_output)
         self.status_label = QLabel()
         self.status_label.setObjectName('status')
@@ -282,15 +422,21 @@ class FileConverterPanel(FeaturePage):
         self.last_status = (key, values)
         self.status_label.setText(tr(self.language, key, **values))
 
+    def accept_files(self, paths):
+        raise NotImplementedError
+
 
 class ShortcutConverterPanel(FileConverterPanel):
     """Premiere ↔ FilmCraft shortcut conversion, embedded in its own subtab."""
+    drop_kind = 'hotkeys'
 
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent, language)
         self.retranslate()
 
     def retranslate(self):
+        self.drop.language = self.language
+        self.drop.retranslate()
         self.title_label.setText(tr(self.language, 'shortcut_heading'))
         self.note_label.setText(tr(self.language, 'shortcut_note'))
         self.source_title.setText(tr(self.language, 'source_shortcuts'))
@@ -306,10 +452,24 @@ class ShortcutConverterPanel(FileConverterPanel):
         path, _ = QFileDialog.getOpenFileName(
             self, tr(self.language, 'choose_shortcut_file'), '',
             tr(self.language, 'shortcut_filter'))
-        if not path:
+        if path:
+            self.accept_files([path])
+
+    def accept_files(self, paths):
+        if len(paths) != 1:
+            QMessageBox.warning(self, tr(self.language, 'drop_single_title'),
+                                tr(self.language, 'drop_single'))
             return
-        self.input_edit.setText(path)
-        p = Path(path)
+        p = Path(paths[0])
+        if not p.is_file():
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_file'))
+            return
+        if p.suffix.lower() not in ('.kys', '.json', '.txt'):
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_hotkeys'))
+            return
+        self.input_edit.setText(str(p))
         is_json = p.suffix.lower() == '.json'
         if is_json:
             try:
@@ -379,10 +539,12 @@ class ShortcutConverterPanel(FileConverterPanel):
 
 class AexConverterPanel(FileConverterPanel):
     """AE plug-in inspection and independent effect ports, inline in its subtab."""
+    drop_kind = 'plugins'
 
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent, language)
-        self.profile_edit, self.profile_btn = self.file_row(self.source_layout)
+        self.profile_edit, self.profile_btn = self.file_row(
+            self.source_layout, self.accept_profile_files)
         self.profile_btn.clicked.connect(self.choose_profile)
         self.profile_hint = QLabel()
         self.profile_hint.setObjectName('muted')
@@ -391,6 +553,8 @@ class AexConverterPanel(FileConverterPanel):
         self.retranslate()
 
     def retranslate(self):
+        self.drop.language = self.language
+        self.drop.retranslate()
         self.title_label.setText(tr(self.language, 'plugin_heading'))
         self.note_label.setText(tr(self.language, 'plugin_note'))
         self.source_title.setText(tr(self.language, 'source_plugin'))
@@ -409,11 +573,25 @@ class AexConverterPanel(FileConverterPanel):
         path, _ = QFileDialog.getOpenFileName(
             self, tr(self.language, 'plugin_choose'), '',
             tr(self.language, 'plugin_filter'))
-        if not path:
+        if path:
+            self.accept_files([path])
+
+    def accept_files(self, paths):
+        if len(paths) != 1:
+            QMessageBox.warning(self, tr(self.language, 'drop_single_title'),
+                                tr(self.language, 'drop_single'))
             return
-        self.input_edit.setText(path)
+        source = Path(paths[0])
+        if not source.is_file():
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_file'))
+            return
+        if not (source.suffix.lower() == '.aex' or source.name.lower().endswith('.aex.txt')):
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_plugin'))
+            return
+        self.input_edit.setText(str(source))
         self.profile_edit.clear()  # A profile for a previous DLL must not be reused.
-        source = Path(path)
         stem = output_stem(source) + '_effectcraft'
         n = 1
         while True:
@@ -432,7 +610,23 @@ class AexConverterPanel(FileConverterPanel):
             self, tr(self.language, 'plugin_profile_choose'), current,
             tr(self.language, 'plugin_profile_filter'))
         if path:
-            self.profile_edit.setText(path)
+            self.accept_profile_files([path])
+
+    def accept_profile_files(self, paths):
+        if len(paths) != 1:
+            QMessageBox.warning(self, tr(self.language, 'drop_single_title'),
+                                tr(self.language, 'drop_single'))
+            return
+        profile = Path(paths[0])
+        if not profile.is_file():
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_file'))
+            return
+        if profile.suffix.lower() != '.json':
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_profile'))
+            return
+        self.profile_edit.setText(str(profile))
 
     def choose_output(self):
         current = self.output_edit.text().strip() or str(Path.home())
@@ -477,16 +671,29 @@ class AexConverterPanel(FileConverterPanel):
 
 
 class PlannedFeature(FeaturePage):
-    """Non-converting placeholder with the same page structure as live tabs."""
+    """Accept file drops for a preview, but never pretend to convert them."""
 
     def __init__(self, program: str, feature: str, language: str):
         super().__init__()
         self.program = program
         self.feature = feature
+        self.language = language
+        self.preview_paths: list[str] = []
+        self.drop = DropArea(language, kind='planned')
+        self.drop.filesDropped.connect(self.accept_files)
+        self.filesDropped.connect(self.accept_files)
+        self.source_layout.addWidget(self.drop)
+        self.input_edit, self.input_btn = self.file_row(self.source_layout, self.accept_files)
+        self.input_edit.setReadOnly(True)
+        self.input_edit.setAcceptDrops(True)
+        self.input_btn.clicked.connect(self.choose_input)
         self.source_message = QLabel()
         self.source_message.setObjectName('muted')
         self.source_message.setWordWrap(True)
         self.source_layout.addWidget(self.source_message)
+        self.output_edit, self.output_btn = self.file_row(self.target_layout)
+        self.output_edit.setEnabled(False)
+        self.output_btn.setEnabled(False)
         self.target_message = QLabel()
         self.target_message.setObjectName('muted')
         self.target_message.setWordWrap(True)
@@ -494,43 +701,123 @@ class PlannedFeature(FeaturePage):
         self.status_label = QLabel()
         self.status_label.setObjectName('status')
         self.footer_layout.addWidget(self.status_label, 1)
+        self.run_btn = QPushButton()
+        self.run_btn.setObjectName('primary')
+        self.run_btn.setEnabled(False)
+        self.footer_layout.addWidget(self.run_btn)
         self.retranslate(language)
 
+    def choose_input(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, tr(self.language, 'planned_choose'), '', tr(self.language, 'all_files_filter'))
+        if paths:
+            self.accept_files(paths)
+
+    def accept_files(self, paths):
+        if not paths or any(not Path(path).is_file() for path in paths):
+            QMessageBox.warning(self, tr(self.language, 'drop_invalid_title'),
+                                tr(self.language, 'drop_invalid_file'))
+            return
+        self.preview_paths = list(paths)
+        self.retranslate(self.language)
+
     def retranslate(self, language: str):
+        self.language = language
+        self.drop.language = language
+        self.drop.retranslate()
         self.title_label.setText(tr(language, 'planned_title'))
         self.note_label.setText(tr(language, 'planned_note', pair=self.program,
                                    feature=tr(language, 'tab_' + self.feature)))
         self.source_title.setText(tr(language, 'source_data'))
         self.target_title.setText(tr(language, 'target_data'))
-        self.source_message.setText(tr(language, 'planned_source'))
+        self.input_edit.setPlaceholderText(tr(language, 'planned_input'))
+        self.input_btn.setText(tr(language, 'shortcut_file'))
+        self.output_edit.setPlaceholderText(tr(language, 'planned_output'))
+        self.output_btn.setText(tr(language, 'save_as'))
+        self.run_btn.setText(tr(language, 'planned_title'))
         self.target_message.setText(tr(language, 'planned_target'))
-        self.status_label.setText(tr(language, 'planned_title'))
+        if self.preview_paths:
+            self.input_edit.setText(self.preview_paths[0] +
+                                    (f' (+{len(self.preview_paths) - 1})'
+                                     if len(self.preview_paths) > 1 else ''))
+            self.input_edit.setToolTip('\n'.join(self.preview_paths))
+            preview = tr(language, 'planned_preview', n=len(self.preview_paths))
+            self.source_message.setText(preview)
+            self.status_label.setText(preview)
+        else:
+            self.source_message.setText(tr(language, 'planned_source'))
+            self.status_label.setText(tr(language, 'planned_title'))
 
 
 class DropArea(QFrame):
-    filesDropped=Signal(list)
-    def __init__(self, language='ru'):
-        super().__init__();self.language=language;self.setAcceptDrops(True);self.setObjectName('dropArea')
-        self.setMinimumHeight(150);self.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Fixed)
-        lay=QVBoxLayout(self);lay.setAlignment(Qt.AlignCenter);lay.setSpacing(6)
-        icon=QLabel('↥');icon.setObjectName('dropIcon');icon.setAlignment(Qt.AlignCenter)
-        self.title_label=QLabel();self.title_label.setObjectName('dropTitle');self.title_label.setAlignment(Qt.AlignCenter)
-        self.note_label=QLabel();self.note_label.setObjectName('muted');self.note_label.setAlignment(Qt.AlignCenter)
-        lay.addWidget(icon);lay.addWidget(self.title_label);lay.addWidget(self.note_label);self.retranslate()
+    """Identical, copy-only Explorer drop target shared by all feature pages."""
+    filesDropped = Signal(list)
+    _keys = {
+        'projects': ('drop_title', 'drop_note'),
+        'hotkeys': ('drop_hotkeys_title', 'drop_hotkeys_note'),
+        'plugins': ('drop_plugins_title', 'drop_plugins_note'),
+        'planned': ('drop_planned_title', 'drop_planned_note'),
+    }
+
+    def __init__(self, language='ru', kind='projects'):
+        super().__init__()
+        self.language = language
+        self.kind = kind
+        self.setAcceptDrops(True)
+        self.setObjectName('dropArea')
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setMinimumHeight(150)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        lay = QVBoxLayout(self)
+        lay.setAlignment(Qt.AlignCenter)
+        lay.setSpacing(6)
+        icon = QLabel('↥')
+        icon.setObjectName('dropIcon')
+        icon.setAlignment(Qt.AlignCenter)
+        self.title_label = QLabel()
+        self.title_label.setObjectName('dropTitle')
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.note_label = QLabel()
+        self.note_label.setObjectName('muted')
+        self.note_label.setAlignment(Qt.AlignCenter)
+        for child in (icon, self.title_label, self.note_label):
+            child.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            lay.addWidget(child)
+        self.retranslate()
+
     def retranslate(self):
-        self.title_label.setText(tr(self.language,'drop_title'))
-        self.note_label.setText(tr(self.language,'drop_note'))
-    def dragEnterEvent(self,event):
-        if event.mimeData().hasUrls() and any(u.isLocalFile() for u in event.mimeData().urls()):
-            event.acceptProposedAction();self.setProperty('dragging',True);self.style().unpolish(self);self.style().polish(self)
-        else:event.ignore()
-    def dragLeaveEvent(self,event):
-        self.setProperty('dragging',False);self.style().unpolish(self);self.style().polish(self);event.accept()
-    def dropEvent(self,event):
-        paths=[u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
-        self.setProperty('dragging',False);self.style().unpolish(self);self.style().polish(self)
-        if paths:self.filesDropped.emit(paths);event.acceptProposedAction()
-        else:event.ignore()
+        title_key, note_key = self._keys[self.kind]
+        self.title_label.setText(tr(self.language, title_key))
+        self.note_label.setText(tr(self.language, note_key))
+
+    def _set_dragging(self, value):
+        if self.property('dragging') == value:
+            return
+        self.setProperty('dragging', value)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def dragEnterEvent(self, event):
+        if accept_local_drag(event):
+            self._set_dragging(True)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if not accept_local_drag(event):
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._set_dragging(False)
+        event.accept()
+
+    def dropEvent(self, event):
+        self._set_dragging(False)
+        if accept_local_drag(event):
+            self.filesDropped.emit(local_drop_paths(event.mimeData()))
+        else:
+            event.ignore()
 
 
 class ConversionWorker(QThread):
@@ -624,6 +911,7 @@ class MainWindow(QMainWindow):
         self.project_page = FeaturePage(self.premiere_tabs)
         self.drop = DropArea(self.language)
         self.drop.filesDropped.connect(self.add_paths)
+        self.project_page.filesDropped.connect(self.add_paths)
         self.project_page.source_layout.addWidget(self.drop)
         actions = QHBoxLayout()
         self.add_btn = QPushButton()
@@ -646,11 +934,7 @@ class MainWindow(QMainWindow):
         self.output_edit.setText(self.settings.value('output_dir', '', type=str))
         self.browse_btn.clicked.connect(self.choose_output_dir)
 
-        queue_panel = QFrame()
-        queue_panel.setObjectName('panel')
-        queue_layout = QVBoxLayout(queue_panel)
-        queue_layout.setContentsMargins(16, 12, 16, 12)
-        queue_layout.setSpacing(8)
+        queue_panel, queue_layout = self.project_page.card()
         qhead = QHBoxLayout()
         self.queue_title = QLabel()
         self.queue_title.setObjectName('section')
@@ -674,11 +958,7 @@ class MainWindow(QMainWindow):
         self.project_page.details_layout.addWidget(queue_panel, 1)
 
         # These controls belong to the selected FC entry, not to the whole queue.
-        self.reverse_panel = QFrame()
-        self.reverse_panel.setObjectName('panel')
-        reverse_layout = QVBoxLayout(self.reverse_panel)
-        reverse_layout.setContentsMargins(16, 12, 16, 12)
-        reverse_layout.setSpacing(8)
+        self.reverse_panel, reverse_layout = self.project_page.card()
         self.reverse_heading = QLabel()
         self.reverse_heading.setObjectName('section')
         self.reverse_note = QLabel()
@@ -825,7 +1105,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet('''
             QWidget{background:#0d1118;color:#edf2f7;font-family:"Segoe UI",Arial,sans-serif;font-size:13px}
             QLabel{background:transparent}
-            QScrollArea#featurePage,QWidget#featureContent{background:#111720;border:0}
+            QScrollArea#featurePage,QWidget#featureViewport,QWidget#featureContent{background:#111720;border:0}
             QLabel#title{font-size:24px;font-weight:750;letter-spacing:-.4px;color:#f5f7fa}
             QLabel#formTitle{font-size:20px;font-weight:750;color:#f5f7fa}
             QLabel#muted,QLabel#footnote{color:#9aa6b5;font-size:12px}
@@ -842,6 +1122,7 @@ class MainWindow(QMainWindow):
             QFrame#panel{background:#19232e;border:1px solid #415265;border-radius:13px}
             QLineEdit{background:#0a0e14;border:1px solid #343f4e;border-radius:8px;padding:10px 11px;color:#e9eef4;selection-background-color:#3a8f78}
             QLineEdit:focus{border-color:#69d5b4}
+            QLineEdit:disabled{background:#111720;border-color:#344250;color:#9aa6b5}
             QPushButton{background:#1b232e;border:1px solid #394555;border-radius:9px;padding:9px 13px;color:#e2e8ef;font-weight:650}
             QPushButton:hover{background:#252f3c;border-color:#596a7c}
             QPushButton:disabled{color:#697483;background:#171c24;border-color:#252b35}

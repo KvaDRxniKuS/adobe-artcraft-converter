@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 try:
+    from PySide6.QtCore import Qt, QMimeData, QPoint, QPointF, QUrl
+    from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
     from PySide6.QtWidgets import QApplication, QMessageBox, QFrame
     import desktop_app
 except (ImportError, OSError) as exc:
@@ -56,6 +58,28 @@ class MixedQueueUITests(unittest.TestCase):
             self.window.worker.wait(5000)
             self.app.processEvents()
 
+    def drop_files(self, widget, paths, *, action=None, accepted=True):
+        """Send real Qt drag-enter, move and drop events, without a GUI automation server."""
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
+        actions = action if action is not None else Qt.CopyAction | Qt.MoveAction
+        enter = QDragEnterEvent(QPoint(10, 10), actions, mime,
+                                Qt.LeftButton, Qt.NoModifier)
+        self.app.sendEvent(widget, enter)
+        self.assertEqual(enter.isAccepted(), accepted)
+        if not accepted:
+            return
+        self.assertEqual(enter.dropAction(), Qt.CopyAction)
+        move = QDragMoveEvent(QPoint(10, 10), actions, mime,
+                              Qt.LeftButton, Qt.NoModifier)
+        self.app.sendEvent(widget, move)
+        self.assertTrue(move.isAccepted())
+        drop = QDropEvent(QPointF(10, 10), actions, mime,
+                          Qt.LeftButton, Qt.NoModifier)
+        self.app.sendEvent(widget, drop)
+        self.assertTrue(drop.isAccepted())
+        self.assertEqual(drop.dropAction(), Qt.CopyAction)
+
     def test_one_queue_detects_both_directions_and_keeps_shortcuts_separate(self):
         self.assertEqual(self.window.table.columnCount(), 4)
         self.assertFalse(hasattr(self.window, 'reverse_btn'))
@@ -87,12 +111,21 @@ class MixedQueueUITests(unittest.TestCase):
         # every nested QScrollArea and its cards must be styled on Windows too.
         self.assertIn('QFrame#panel', self.app.styleSheet())
         self.assertIn('QWidget#featureContent', self.app.styleSheet())
+        self.assertIn('QWidget#featureViewport', self.app.styleSheet())
         for page in pages:
             with self.subTest(page=page.__class__.__name__):
                 self.assertIsInstance(page, desktop_app.FeaturePage)
                 self.assertTrue(page.widgetResizable())
                 self.assertEqual(page.objectName(), 'featurePage')
                 self.assertEqual(page.widget().objectName(), 'featureContent')
+                self.assertTrue(page.widget().testAttribute(Qt.WA_StyledBackground))
+                self.assertTrue(page.viewport().testAttribute(Qt.WA_StyledBackground))
+                self.assertTrue(page.acceptDrops())
+                self.assertTrue(page.drop.acceptDrops())
+                self.assertEqual(page.drop.objectName(), 'dropArea')
+                self.assertTrue(page.drop.testAttribute(Qt.WA_StyledBackground))
+                self.assertEqual(page.drop.minimumHeight(), 150)
+                self.assertIs(page.source_layout.itemAt(0).widget(), page.drop)
                 self.assertIs(page.root.itemAt(0).widget(), page.title_label)
                 self.assertIs(page.root.itemAt(1).widget(), page.note_label)
                 self.assertIs(page.root.itemAt(2).widget(), page.source_panel)
@@ -107,6 +140,7 @@ class MixedQueueUITests(unittest.TestCase):
                 for card in (page.source_panel, page.target_panel):
                     self.assertEqual(card.objectName(), 'panel')
                     self.assertEqual(card.frameShape(), QFrame.StyledPanel)
+                    self.assertTrue(card.testAttribute(Qt.WA_StyledBackground))
                     card_margins = card.layout().contentsMargins()
                     self.assertEqual((card_margins.left(), card_margins.top(),
                                       card_margins.right(), card_margins.bottom()),
@@ -115,6 +149,13 @@ class MixedQueueUITests(unittest.TestCase):
                 self.assertTrue(page.note_label.text())
                 self.assertTrue(page.source_title.text())
                 self.assertTrue(page.target_title.text())
+                self.assertEqual(page.run_btn.objectName(), 'primary')
+                self.assertIs(page.footer_layout.itemAt(page.footer_layout.count() - 1).widget(),
+                              page.run_btn)
+        for detail in (self.window.project_page.details_layout.itemAt(0).widget(),
+                       self.window.reverse_panel):
+            self.assertEqual(detail.frameShape(), QFrame.StyledPanel)
+            self.assertTrue(detail.testAttribute(Qt.WA_StyledBackground))
         self.assertIs(self.window.premiere_tabs.widget(0), self.window.project_page)
         self.assertIs(self.window.project_page.source_panel.findChild(desktop_app.DropArea),
                       self.window.drop)
@@ -146,7 +187,7 @@ class MixedQueueUITests(unittest.TestCase):
         self.window.after_effects_tabs.setCurrentIndex(0)
         planned = self.window.after_effects_tabs.currentWidget()
         self.assertIsInstance(planned, desktop_app.PlannedFeature)
-        self.assertFalse(hasattr(planned, 'run_btn'))
+        self.assertFalse(planned.run_btn.isEnabled())
         self.assertTrue(planned.title_label.text())
         self.assertIn('EffectCraft', planned.note_label.text())
         self.assertIn('PhotoCraft', self.window.photoshop_tabs.widget(0).note_label.text())
@@ -168,6 +209,107 @@ class MixedQueueUITests(unittest.TestCase):
                          desktop_app.tr('en', 'source_plugin'))
         self.assertEqual(planned.target_message.text(),
                          desktop_app.tr('en', 'planned_target'))
+
+    def test_local_drop_works_in_each_subtab_and_uses_the_same_file_selection_path(self):
+        self.window.program_tabs.setCurrentIndex(0)
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(self.window.drop, [self.premiere, self.source])
+            warning.assert_not_called()
+        self.assertEqual(len(self.window.files), 2)
+
+        shortcuts = self.source.with_name('shortcuts.json')
+        shortcuts.write_text(json.dumps({'format': 'filmcraft-keyboard-shortcuts'}), encoding='utf-8')
+        self.window.premiere_tabs.setCurrentIndex(1)
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(self.window.shortcut_panel.drop, [shortcuts])
+            warning.assert_not_called()
+        self.assertEqual(self.window.shortcut_panel.input_edit.text(), str(shortcuts))
+        self.assertEqual(Path(self.window.shortcut_panel.output_edit.text()),
+                         shortcuts.with_suffix('.kys'))
+        kys = self.source.with_name('shortcut.kys')
+        kys.write_text('<PremiereData/>', encoding='utf-8')
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(self.window.shortcut_panel.input_edit, [kys])
+            warning.assert_not_called()
+        self.assertEqual(self.window.shortcut_panel.input_edit.text(), str(kys))
+        self.assertEqual(Path(self.window.shortcut_panel.output_edit.text()),
+                         kys.with_suffix('.json'))
+        self.assertFalse(kys.with_suffix('.json').exists())  # Drop selects; it never converts.
+
+        plug_in = self.source.with_name('Deep Glow.aex.txt')
+        plug_in.write_bytes(sample_deep_glow())
+        panel = self.window.plugin_panel
+        self.window.program_tabs.setCurrentIndex(1)
+        self.window.after_effects_tabs.setCurrentIndex(2)
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(panel.drop, [plug_in])
+            self.drop_files(panel.widget(), [plug_in])  # Background, outside outlined target.
+            warning.assert_not_called()
+        self.assertEqual(panel.input_edit.text(), str(plug_in))
+        self.assertEqual(Path(panel.output_edit.text()),
+                         plug_in.with_name('Deep Glow_effectcraft.wasm'))
+        profile = self.source.with_name('profile.json')
+        profile.write_text(json.dumps(sample_profile('Deep Glow', 'PEDG')), encoding='utf-8')
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(panel.profile_edit, [profile])
+            warning.assert_not_called()
+        self.assertEqual(panel.profile_edit.text(), str(profile))
+        self.assertFalse(Path(panel.output_edit.text()).exists())
+        self.assertEqual(len(self.window.files), 2)  # No drop leaked into another tab.
+
+        planned_file = self.source.with_name('image.psd')
+        planned_file.write_bytes(b'unmodified input')
+        for tabs, page, _ in self.window.planned_features:
+            self.window.program_tabs.setCurrentWidget(tabs)
+            tabs.setCurrentWidget(page)
+            with self.subTest(program=page.program, feature=page.feature), \
+                 patch.object(QMessageBox, 'warning') as warning:
+                self.drop_files(page.drop, [planned_file])
+                warning.assert_not_called()
+                self.assertEqual(page.preview_paths, [str(planned_file)])
+                self.assertEqual(page.input_edit.text(), str(planned_file))
+                self.assertIn('не реализована', page.status_label.text())
+                self.assertFalse(page.run_btn.isEnabled())
+                self.assertFalse(page.output_edit.isEnabled())
+                self.assertFalse(page.output_edit.text())
+        self.assertEqual(planned_file.read_bytes(), b'unmodified input')
+        self.assertEqual(len(self.window.files), 2)
+
+    def test_drop_rejects_remote_moves_and_multiple_inputs_without_overwriting_fields(self):
+        panel = self.window.plugin_panel
+        source = self.source.with_name('Deep Glow.aex.txt')
+        source.write_bytes(sample_deep_glow())
+        with patch.object(QMessageBox, 'warning'):
+            self.drop_files(panel.input_edit, [source])
+        original = panel.input_edit.text(), panel.output_edit.text()
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(panel.drop, [source, source])
+            warning.assert_called_once()
+            self.drop_files(panel.drop, [source], action=Qt.MoveAction, accepted=False)
+        self.assertEqual((panel.input_edit.text(), panel.output_edit.text()), original)
+        self.assertTrue(source.is_file())  # Copy-only drops never move a local file.
+        mime = QMimeData()
+        mime.setUrls([QUrl('https://example.invalid/untrusted.aex')])
+        remote = QDragEnterEvent(QPoint(10, 10), Qt.CopyAction, mime,
+                                 Qt.LeftButton, Qt.NoModifier)
+        self.app.sendEvent(panel.drop, remote)
+        self.assertFalse(remote.isAccepted())
+        with patch.object(QMessageBox, 'warning') as warning:
+            self.drop_files(self.window.shortcut_panel.drop, [source])
+            warning.assert_called_once()
+        self.assertFalse(self.window.shortcut_panel.input_edit.text())
+
+    def test_planned_drop_preview_survives_language_change_but_cannot_convert(self):
+        page = self.window.photoshop_tabs.widget(0)
+        page.accept_files([str(self.source), str(self.premiere)])
+        self.assertEqual(len(page.preview_paths), 2)
+        self.assertIn('(+1)', page.input_edit.text())
+        self.assertIn('не реализована', page.source_message.text())
+        self.window.language_combo.setCurrentIndex(1)
+        self.assertEqual(page.preview_paths, [str(self.source), str(self.premiere)])
+        self.assertIn('not implemented yet', page.source_message.text())
+        self.assertIn('Drop a file', page.drop.title_label.text())
+        self.assertFalse(page.run_btn.isEnabled())
 
     def test_effectcraft_plugins_tab_stays_outside_project_queue_and_writes_wasm(self):
         from PySide6.QtWidgets import QFileDialog

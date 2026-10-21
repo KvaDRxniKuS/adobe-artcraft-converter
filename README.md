@@ -6,7 +6,7 @@
 
 ## Features
 
-- Native desktop UI grouped by **Premiere Pro ↔ FilmCraft**, **After Effects ↔ EffectCraft**, **Photoshop ↔ PhotoCraft**, each with **Projects / Hotkeys / Plugins** subtabs; unfinished tabs show a "Not implemented yet" placeholder and tooltip. All subtabs share the same scrollable page layout (heading, source card, destination card and action footer); the Premiere project page additionally keeps one mixed drag-and-drop queue and per-project options.
+- Native desktop UI grouped by **Premiere Pro ↔ FilmCraft**, **After Effects ↔ EffectCraft**, **Photoshop ↔ PhotoCraft**, each with **Projects / Hotkeys / Plugins** subtabs. All nine subtabs use the same scrollable, visibly framed source/destination cards, drop zone and action footer. Drop files on the zone or input field: working tabs select matching file types (projects support multiple files; hotkeys and plug-ins take one); conversion still validates their contents. Unfinished tabs accept drops **only to show selected paths** and say "Not implemented yet"; they never create output. The Premiere project page additionally keeps one mixed queue and per-project options.
 - Premiere Pro `.prproj` → FilmCraft `.fcproj` conversion, including supported sequences, tracks, clips, transitions, and selected effects.
 - Experimental direct FilmCraft `.fcproj` → Premiere `.prproj` conversion in the same queue, creating media, sequences, tracks and clips from FC references; an empty Premiere shell is optional.
 - Premiere KYS XML ↔ FilmCraft keyboard-shortcut JSON conversion from the **Premiere Pro ↔ FilmCraft → Hotkeys** subtab or CLI.
@@ -136,7 +136,7 @@ The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premi
 
 ## Возможности
 
-- Нативный интерфейс с группами **Premiere Pro ↔ FilmCraft**, **After Effects ↔ EffectCraft**, **Photoshop ↔ PhotoCraft** и подвкладками **Проекты / Горячие клавиши / Плагины**. Неготовые разделы показывают заглушку и подсказку. Все подвкладки используют общий каркас: заголовок, блоки входа и выхода и зону действий; у проектов Premiere/FilmCraft дополнительно сохраняются единая drag-and-drop-очередь и параметры отдельных проектов.
+- Нативный интерфейс с группами **Premiere Pro ↔ FilmCraft**, **After Effects ↔ EffectCraft**, **Photoshop ↔ PhotoCraft** и подвкладками **Проекты / Горячие клавиши / Плагины**. Все девять подвкладок имеют одинаково оформленные блоки источника/результата, зону перетаскивания и нижнюю строку действий. На рабочих вкладках файл можно перетащить в зону или поле источника (проекты принимают несколько файлов, горячие клавиши и плагины — по одному); при конвертации содержимое проверяется отдельно. Неготовые разделы позволяют **только показать выбранные пути**, явно сообщают «Пока не реализовано» и не создают файлы. В проектах Premiere/FilmCraft сохраняются общая очередь и параметры каждого проекта.
 - Конвертация `.prproj` → `.fcproj` с поддержкой части последовательностей, дорожек, клипов, переходов и эффектов.
 - Экспериментальная прямая конвертация FilmCraft `.fcproj` → Premiere `.prproj` в той же очереди: медиа, последовательности, дорожки и клипы создаются из ссылок FC; пустая оболочка Premiere необязательна.
 - Конвертация Premiere KYS XML ↔ FilmCraft JSON через вкладку **Premiere Pro ↔ FilmCraft → Горячие клавиши** или CLI.
