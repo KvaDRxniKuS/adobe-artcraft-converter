@@ -28,16 +28,25 @@ API = f'https://api.github.com/repos/{REPOSITORY}'
 GITHUB_HOSTS = {'api.github.com', 'codeload.github.com', 'github.com'}
 SHA_PATTERN = re.compile(r'[a-fA-F0-9]{40}\Z')
 SAFE_PY_NAME = re.compile(r'[A-Za-z0-9_.-]+\.py\Z', re.IGNORECASE)
-REQUIRED_FILES = frozenset({
-    'desktop_app.py', 'prproj_to_fcproj.py', 'fcproj_to_prproj.py',
-    'direct_fc_to_prproj.py', 'project_import.py', 'reverse_project.py',
-    'graphic_raster.py', 'premiere_seed.py', 'premiere_text.py', 'premiere_text_seed.py',
-    'shortcut_converter.py', 'aex_to_effectcraft.py',
-    'effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py', 'requirements.txt',
-    'FilmCraft_Shortcuts_Template.json', 'Premiere_Shortcuts_Template.kys',
+# Explicit paths keep cached source layout consistent with the checkout. The
+# entry points stay in the root; support modules and templates live below it.
+ROOT_ENTRY_POINTS = frozenset({
+    'desktop_app.py', 'update_converter.py', 'prproj_to_fcproj.py',
+    'fcproj_to_prproj.py', 'shortcut_converter.py', 'aex_to_effectcraft.py',
 })
-EXTRA_FILES = frozenset({'requirements.txt', 'FilmCraft_Shortcuts_Template.json',
-                         'Premiere_Shortcuts_Template.kys'})
+CORE_MODULES = frozenset({
+    'craft_converter/__init__.py', 'craft_converter/direct_fc_to_prproj.py',
+    'craft_converter/project_import.py', 'craft_converter/reverse_project.py',
+    'craft_converter/graphic_raster.py', 'craft_converter/premiere_seed.py',
+    'craft_converter/premiere_text.py', 'craft_converter/premiere_text_seed.py',
+    'craft_converter/effectcraft_pixel_sorter.py',
+    'craft_converter/effectcraft_deep_glow.py',
+})
+SHORTCUT_TEMPLATES = frozenset({
+    'resources/shortcuts/FilmCraft_Shortcuts_Template.json',
+    'resources/shortcuts/Premiere_Shortcuts_Template.kys',
+})
+REQUIRED_FILES = ROOT_ENTRY_POINTS | CORE_MODULES | SHORTCUT_TEMPLATES | {'requirements.txt'}
 MAX_BRANCHES = 40  # Unauthenticated GitHub API calls are limited to 60 per hour.
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_FILE_BYTES = 16 * 1024 * 1024
@@ -139,7 +148,9 @@ def valid_cached_version(folder: Path, versions: Path) -> bool:
     return (not versions.is_symlink() and not folder.is_symlink()
             and folder.resolve().parent == versions.resolve()
             and valid_app_dir(folder)
-            and all(not (folder / name).is_symlink() for name in REQUIRED_FILES))
+            and all(not (folder / name).is_symlink() for name in REQUIRED_FILES)
+            and all(not (folder / directory).is_symlink() for directory in
+                    ('craft_converter', 'resources', 'resources/shortcuts')))
 
 
 def cached_app(cache_dir: Path) -> Path | None:
@@ -177,7 +188,7 @@ def download_archive(sha: str, destination: Path) -> None:
 
 
 def unpack_source(archive: Path, destination: Path) -> None:
-    """Extract only root-level Python modules and required data files."""
+    """Extract only root entry points, internal modules and shortcut data."""
     destination.mkdir()
     seen = set()
     archive_root = None
@@ -186,13 +197,26 @@ def unpack_source(archive: Path, destination: Path) -> None:
         if len(package.infolist()) > 2000:
             raise UpdateError('Update archive contains too many entries')
         for member in package.infolist():
-            parts = PurePosixPath(member.filename).parts
-            if member.is_dir() or len(parts) != 2:
+            if member.is_dir():
                 continue
-            name = parts[1]
-            if parts[0] in ('', '.', '..') or name in ('.', '..'):
+            parts = PurePosixPath(member.filename).parts
+            if len(parts) < 2:
+                continue
+            if parts[0] in ('', '.', '..', '/') or any(part in ('', '.', '..') for part in parts[1:]):
                 raise UpdateError('Unsafe archive path')
-            if not (SAFE_PY_NAME.fullmatch(name) or name in EXTRA_FILES):
+            relative = '/'.join(parts[1:])
+            # No arbitrary directories: tests, tools, user data and WASM builds
+            # never enter the source-only update cache. The embedded effects
+            # travel inside craft_converter/effectcraft_*.py instead.
+            if len(parts) == 2:
+                selected = SAFE_PY_NAME.fullmatch(parts[1]) or relative == 'requirements.txt'
+            elif len(parts) == 3 and parts[1] == 'craft_converter':
+                selected = SAFE_PY_NAME.fullmatch(parts[2])
+            elif len(parts) == 4 and parts[1:3] == ('resources', 'shortcuts'):
+                selected = relative in SHORTCUT_TEMPLATES
+            else:
+                selected = False
+            if not selected:
                 continue
             if archive_root is None:
                 archive_root = parts[0]
@@ -200,16 +224,18 @@ def unpack_source(archive: Path, destination: Path) -> None:
                 raise UpdateError('Source archive has multiple root directories')
             if (member.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
                 raise UpdateError('Source archive contains a symlink')
-            key = name.casefold()
+            key = relative.casefold()
             if key in seen:
                 raise UpdateError('Source archive contains duplicate filenames')
             seen.add(key)
             if member.file_size > MAX_FILE_BYTES:
-                raise UpdateError(f'Update file is too large: {name}')
+                raise UpdateError(f'Update file is too large: {relative}')
             total += member.file_size
             if total > MAX_SOURCE_BYTES:
                 raise UpdateError('Update source exceeds the size limit')
-            with package.open(member) as source, (destination / name).open('xb') as out:
+            target = destination.joinpath(*parts[1:])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with package.open(member) as source, target.open('xb') as out:
                 written = 0
                 while True:
                     chunk = source.read(64 * 1024)
@@ -217,12 +243,12 @@ def unpack_source(archive: Path, destination: Path) -> None:
                         break
                     written += len(chunk)
                     if written > MAX_FILE_BYTES:
-                        raise UpdateError(f'Update file is too large: {name}')
+                        raise UpdateError('Update file is too large: ' + relative)
                     out.write(chunk)
     if not valid_app_dir(destination):
         raise UpdateError('Archive lacks required application files')
     # Reject damaged/incompatible Python source before changing the selected version.
-    for path in destination.glob('*.py'):
+    for path in list(destination.glob('*.py')) + list((destination / 'craft_converter').glob('*.py')):
         compile(path.read_bytes(), str(path), 'exec')
 
 

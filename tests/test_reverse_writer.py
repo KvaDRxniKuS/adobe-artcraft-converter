@@ -16,10 +16,10 @@ try:
 except ImportError:  # Keep non-Graphic tests runnable before requirements are installed.
     Image = None
 
-from direct_fc_to_prproj import DirectWriter, GraphIndex
+from craft_converter.direct_fc_to_prproj import DirectWriter, GraphIndex
 from fcproj_to_prproj import NativeWriter, TICKS, main as reverse_cli, same_file
 from prproj_to_fcproj import Converter
-from reverse_project import (ReportWriteError, convert_reverse_project,
+from craft_converter.reverse_project import (ReportWriteError, convert_reverse_project,
                              reverse_report_path)
 from test_premiere_text import TextView, flatbuffers
 
@@ -278,7 +278,7 @@ class DirectWriterTests(unittest.TestCase):
     @unittest.skipIf(flatbuffers is None, 'flatbuffers is not installed')
     def test_native_graphic_does_not_require_pillow(self):
         self.add_graphic()
-        with patch('direct_fc_to_prproj.render_graphic',
+        with patch('craft_converter.direct_fc_to_prproj.render_graphic',
                    side_effect=AssertionError('Raster path must not be used')):
             DirectWriter(self.source).write(self.output)
         self.assertEqual(len(self.read_root(self.output).findall('ArbVideoComponentParam')), 1)
@@ -332,7 +332,7 @@ class DirectWriterTests(unittest.TestCase):
     def test_generated_graphic_assets_are_removed_if_project_write_fails(self):
         self.add_graphic(raster=True)
         self.output.write_bytes(b'keep earlier output')
-        with patch('direct_fc_to_prproj.os.replace', side_effect=OSError('disk full')):
+        with patch('craft_converter.direct_fc_to_prproj.os.replace', side_effect=OSError('disk full')):
             with self.assertRaisesRegex(OSError, 'disk full'):
                 DirectWriter(self.source).write(self.output)
         self.assertEqual(self.output.read_bytes(), b'keep earlier output')
@@ -341,7 +341,7 @@ class DirectWriterTests(unittest.TestCase):
 
     def test_graphic_missing_dependency_has_an_actionable_error(self):
         self.add_graphic(raster=True)
-        with patch('direct_fc_to_prproj.render_graphic',
+        with patch('craft_converter.direct_fc_to_prproj.render_graphic',
                    side_effect=RuntimeError('Установите Pillow из requirements.txt')):
             with self.assertRaisesRegex(RuntimeError, 'Pillow'):
                 DirectWriter(self.source).write(self.output)
@@ -568,7 +568,7 @@ class DirectWriterTests(unittest.TestCase):
 
     def test_failed_serialization_preserves_existing_output(self):
         self.output.write_bytes(b'earlier version')
-        with patch('direct_fc_to_prproj.os.replace', side_effect=OSError('disk full')):
+        with patch('craft_converter.direct_fc_to_prproj.os.replace', side_effect=OSError('disk full')):
             with self.assertRaisesRegex(OSError, 'disk full'):
                 DirectWriter(self.source).write(self.output)
         self.assertEqual(self.output.read_bytes(), b'earlier version')
@@ -577,7 +577,7 @@ class DirectWriterTests(unittest.TestCase):
     def test_report_failure_identifies_saved_project_and_preserves_old_report(self):
         report = reverse_report_path(self.output)
         report.write_text('old report', encoding='utf-8')
-        with patch('reverse_project.reverse_report_text', side_effect=OSError('report blocked')):
+        with patch('craft_converter.reverse_project.reverse_report_text', side_effect=OSError('report blocked')):
             with self.assertRaisesRegex(ReportWriteError, 'report blocked') as raised:
                 convert_reverse_project(self.source, self.output)
         self.assertEqual(raised.exception.output, self.output)

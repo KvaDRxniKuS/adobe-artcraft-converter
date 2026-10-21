@@ -15,8 +15,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
-from effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
+from craft_converter.effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
+from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
                                    WASM_SHA256 as GLOW_SHA256)
 from fcproj_to_prproj import same_file
 

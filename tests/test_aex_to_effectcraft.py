@@ -14,8 +14,8 @@ from pathlib import Path
 
 from aex_to_effectcraft import (UnsupportedAexError, convert_aex, inspect_aex,
                                 main, output_stem)
-from effectcraft_pixel_sorter import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
-from effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, MANIFEST_SHA256 as GLOW_MANIFEST_SHA256,
+from craft_converter.effectcraft_pixel_sorter import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
+from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, MANIFEST_SHA256 as GLOW_MANIFEST_SHA256,
                                    WASM as GLOW_WASM, WASM_SHA256 as GLOW_SHA256)
 
 ROOT = Path(__file__).resolve().parents[1]

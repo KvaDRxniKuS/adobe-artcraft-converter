@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from aex_to_effectcraft import convert_aex, inspect_aex
-from effectcraft_deep_glow import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
+from craft_converter.effectcraft_deep_glow import MANIFEST, MANIFEST_SHA256, WASM, WASM_SHA256
 
 ROOT = Path(__file__).resolve().parents[1]
 REAL_GLOW = Path('/tmp/arena-coding-uploads/Deep Glow.aex.txt')

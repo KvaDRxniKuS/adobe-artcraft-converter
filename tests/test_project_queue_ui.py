@@ -17,10 +17,10 @@ except (ImportError, OSError) as exc:
 else:
     QT_ERROR = ''
 
-from project_import import FC_TO_PR, PR_TO_FC
+from craft_converter.project_import import FC_TO_PR, PR_TO_FC
 from test_reverse_writer import REFERENCE, SHELL
 from test_aex_to_effectcraft import sample_aex, sample_deep_glow
-from effectcraft_deep_glow import WASM as GLOW_WASM
+from craft_converter.effectcraft_deep_glow import WASM as GLOW_WASM
 
 
 @unittest.skipUnless(desktop_app is not None, f'PySide6 GUI unavailable: {QT_ERROR}')
@@ -230,7 +230,7 @@ class MixedQueueUITests(unittest.TestCase):
 
     def test_hotkeys_tab_converts_kys_and_json_without_extra_window(self):
         from PySide6.QtWidgets import QFileDialog
-        template = Path(desktop_app.__file__).parent / 'Premiere_Shortcuts_Template.kys'
+        template = desktop_app.resource_path('Premiere_Shortcuts_Template.kys')
         keys = self.source.with_name('keys.kys')
         tree = ET.parse(template)
         item = next(x for x in tree.getroot().iter()

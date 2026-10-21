@@ -14,6 +14,14 @@
 - Conversion reports list unsupported or unmapped items instead of guessing at command/effect equivalence.
 - Original project media is referenced, not copied; moved media must be relinked. A single static `graphic_text` layer per Graphic clip is encoded as an editable Premiere Type-tool title. Unsupported or more complex Graphics fall back to PNGs beside the project.
 
+## Repository layout
+
+- At the top level: `Start_Converter.bat`, `Build_Windows_EXE.bat`, `desktop_app.py`, `update_converter.py`, the four CLI scripts, `requirements.txt` and this README — entry points and build instructions remain visible.
+- `craft_converter/`: importable conversion helpers, Premiere graph fixtures and Python-embedded EffectCraft assets (not separate commands).
+- `resources/shortcuts/`: sanitized Premiere and FilmCraft shortcut templates, bundled by the Windows build and included in source-only updates.
+- `effectcraft_plugins/`: EffectCraft WASM examples, manifests and AssemblyScript sources; `tools/`: optional effect build scripts; `tests/`: automated checks.
+- `uploads/`: ignored local user files and conversion outputs; do not add them to Git or move them as part of a source update.
+
 ## Windows: run from source
 
 Requires Python 3.10+ and Windows.
@@ -38,6 +46,8 @@ With Python 3.10+ installed, the batch file uses `update_converter.py` to inspec
 
 Versions are cached under `%LOCALAPPDATA%\FilmCraftConverter\source-updates\versions\<commit>`. Your checkout, launcher, EXE, user projects, and shortcut profiles are **not overwritten**. If GitHub is offline/rate-limited or an update fails validation, the last cached version is launched (or the local source if none is cached). Set `FILMCRAFT_SKIP_UPDATE=1` before launching to run the local source without a network check. The check is limited to 40 branches because unauthenticated GitHub API requests are rate-limited; when this limit is exceeded, it falls back safely.
 
+**One-time migration:** a checkout with the old `update_converter.py` cannot install the new nested source layout: it only extracted root files, and the source updater intentionally never replaces its own local copy. Update that checkout from the branch containing this layout change (for example with `git pull` on that branch, or a fresh source ZIP), then launch `Start_Converter.bat` again. Keep your existing `uploads/` and EXE; do not copy user files into Git.
+
 This is a **source-only** updater: dependencies (PySide6, flatbuffers for editable titles and Pillow for raster fallback) are not installed automatically. After updating sources, run `py -3 -m pip install -r requirements.txt` if they are missing. The EXE is neither downloaded nor rebuilt automatically; to update a standalone EXE, rebuild it with `Build_Windows_EXE.bat` or publish a release binary separately.
 
 ## Project conversion: shared queue
@@ -55,10 +65,10 @@ Open **Premiere Pro ↔ FilmCraft → Hotkeys**. This inline form accepts a Prem
 
 ```powershell
 py -3 shortcut_converter.py my-shortcuts.kys FilmCraft.json `
-  --fc-template FilmCraft_Shortcuts_Template.json --language en
+  --fc-template resources/shortcuts/FilmCraft_Shortcuts_Template.json --language en
 
 py -3 shortcut_converter.py FilmCraft.json Premiere.kys `
-  --kys-template Premiere_Shortcuts_Template.kys --language en
+  --kys-template resources/shortcuts/Premiere_Shortcuts_Template.kys --language en
 ```
 
 The bundled template files are **sanitized mapping catalogs**: they contain no user's assigned key combinations. For Premiere output, commands not represented in the FilmCraft mapping may remain unassigned; for FilmCraft output, unmapped commands are reported. If multiple FilmCraft commands map to one Premiere command, only the first is written and the conflict is reported. The crosswalk is intentionally conservative and does not fuzzy-match command names. If you use a personal shortcut profile as an input, keep it private and do not commit it.
@@ -78,11 +88,11 @@ The parser bounds input to 64 MiB and accepts structurally valid x86/x64 Windows
 
 The Pixel Sorter port has 18 independently defined controls. The Deep Glow-like port has 14 controls including threshold, radius, exposure, multi-scale spread, tint and alpha expansion; it uses separable CPU bloom rather than Deep Glow 2's proprietary/OpenGL implementation. Neither matches the original automatically; AE presets, external inputs, GPU options and licensing are not transferred. The **EffectCraft app itself has not been run here**; both modules' ABI and actual rendering were tested in Node.js and Wasmtime. Loading in the desktop app and visual parity with an AE render still require your check.
 
-Standalone AssemblyScript sources and manifests live in `effectcraft_plugins/`; the self-contained Python assets `effectcraft_pixel_sorter.py` and `effectcraft_deep_glow.py` allow source-only updates and Windows EXEs without bundling a compiler. To **rebuild sources** (not needed for users): `npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20`, then run `python3 tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc` or `python3 tools/build_deep_glow.py --asc .venv/wasm-tools/node_modules/.bin/asc` (Windows: `asc.cmd`). Verify with `node tests/effectcraft_wasm_smoke.cjs`, `node tests/deep_glow_wasm_smoke.cjs` and Python tests.
+Standalone AssemblyScript sources and manifests live in `effectcraft_plugins/`; the self-contained Python assets `craft_converter/effectcraft_pixel_sorter.py` and `craft_converter/effectcraft_deep_glow.py` allow source-only updates and Windows EXEs without bundling a compiler. To **rebuild sources** (not needed for users): `npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20`, then run `python3 tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc` or `python3 tools/build_deep_glow.py --asc .venv/wasm-tools/node_modules/.bin/asc` (Windows: `asc.cmd`). Verify with `node tests/effectcraft_wasm_smoke.cjs`, `node tests/deep_glow_wasm_smoke.cjs` and Python tests.
 
 ## FilmCraft → Premiere limitations (experimental)
 
-The writer constructs a native-style **media → master clip → sequence → track → clip** reference graph from FC items, assigning fresh Premiere object IDs. It handles multiple sequences, tracks, reused media, basic video/audio timings and sequences nested by unambiguous name. Original media are **linked by path, never copied**. For a Graphic clip with **one static, supported `graphic_text` layer**, it embeds the Unicode text, font name, size, fill/stroke, alignment and basic transforms in a Premiere Type-tool `AE.ADBE Text` component with a binary Source Text payload. This makes the title *intended to be editable*, instead of rendering it to an image. Fonts must be installed on the Premiere computer; their metrics and layout may differ. Animated or multi-layer titles and unsupported styles fall back to a separate PNG beside the `.prproj` (requires Pillow); keep any generated PNGs with the project. A missing flatbuffers library also triggers PNG fallback; install all dependencies with `py -3 -m pip install -r requirements.txt`. Both small, neutral graph layouts originate in public MIT fixtures (attribution and licenses in `premiere_seed.py` and `premiere_text_seed.py`), not a project containing your media. An optional empty shell only supplies two build-version strings; it is **not** a guarantee that the graph matches your Premiere version. **The native title has passed structural/payload and timeline round-trip tests, not an Adobe Premiere open, edit or render test.** Diagnostics in the report are currently in Russian even in the English UI.
+The writer constructs a native-style **media → master clip → sequence → track → clip** reference graph from FC items, assigning fresh Premiere object IDs. It handles multiple sequences, tracks, reused media, basic video/audio timings and sequences nested by unambiguous name. Original media are **linked by path, never copied**. For a Graphic clip with **one static, supported `graphic_text` layer**, it embeds the Unicode text, font name, size, fill/stroke, alignment and basic transforms in a Premiere Type-tool `AE.ADBE Text` component with a binary Source Text payload. This makes the title *intended to be editable*, instead of rendering it to an image. Fonts must be installed on the Premiere computer; their metrics and layout may differ. Animated or multi-layer titles and unsupported styles fall back to a separate PNG beside the `.prproj` (requires Pillow); keep any generated PNGs with the project. A missing flatbuffers library also triggers PNG fallback; install all dependencies with `py -3 -m pip install -r requirements.txt`. Both small, neutral graph layouts originate in public MIT fixtures (attribution and licenses in `craft_converter/premiere_seed.py` and `craft_converter/premiere_text_seed.py`), not a project containing your media. An optional empty shell only supplies two build-version strings; it is **not** a guarantee that the graph matches your Premiere version. **The native title has passed structural/payload and timeline round-trip tests, not an Adobe Premiere open, edit or render test.** Diagnostics in the report are currently in Russian even in the English UI.
 
 The CLI uses the same direct writer:
 
@@ -99,7 +109,7 @@ This remains **experimental**. The embedded graph is a structural starting point
 ## Development checks
 
 ```powershell
-py -3 -m py_compile desktop_app.py aex_to_effectcraft.py effectcraft_pixel_sorter.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py premiere_text.py premiere_text_seed.py reverse_project.py shortcut_converter.py update_converter.py
+py -3 -m compileall -q desktop_app.py update_converter.py aex_to_effectcraft.py fcproj_to_prproj.py prproj_to_fcproj.py shortcut_converter.py craft_converter
 py -3 -m unittest discover -s tests -v
 ```
 
@@ -108,7 +118,7 @@ The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premi
 ## Repository hygiene and privacy
 
 - User projects, test outputs, shortcut profiles, generated `.wasm` files and conversion reports belong in `uploads/` or another local folder and are ignored by Git. Exceptions are the small ready-to-load [Pixel Sorter](effectcraft_plugins/PixelSorter_EffectCraft.wasm) and [Deep Glow](effectcraft_plugins/DeepGlow_EffectCraft.wasm) samples. The original `.aex` and installer must not be added to the repository.
-- The committed shortcut templates are blank/sanitized catalogs. Do not replace them with personal profiles before publishing. The embedded Premiere graph layouts are adapted from MIT-licensed public fixtures; sources, changes and full license notices are in `premiere_seed.py` and `premiere_text_seed.py`.
+- The committed shortcut templates are blank/sanitized catalogs. Do not replace them with personal profiles before publishing. The embedded Premiere graph layouts are adapted from MIT-licensed public fixtures; sources, changes and full license notices are in `craft_converter/premiere_seed.py` and `craft_converter/premiere_text_seed.py`.
 - No credentials or user project/media paths are intended to be part of the source release. Run a final repository scan before pushing, especially after adding test fixtures.
 - No `LICENSE` file is included. Choose a license before describing the project as open source; without one, normal copyright restrictions apply.
 
@@ -129,6 +139,14 @@ The PySide6 GUI should also be smoke-tested on Windows with real FilmCraft/Premi
 - **Экспериментально:** статический анализ любого Windows AE `.aex`; для Pixel Sorter 2 и Deep Glow 2 создаются самостоятельные работающие WASM-эффекты EffectCraft, для других — диагностика без ложного WASM. Это **не** перевод закрытого бинарного кода и не гарантия совпадения с AE.
 - Отчёты перечисляют неподдерживаемые и несопоставленные элементы; конвертер не угадывает похожие команды.
 - Исходные медиа не копируются. Один простой статичный слой `graphic_text` на клипе Graphic кодируется как редактируемый титр Premiere; сложные случаи сохраняются в PNG. Перемещённые файлы нужно перепривязать в целевой программе.
+
+## Структура репозитория
+
+- В корне — `Start_Converter.bat`, `Build_Windows_EXE.bat`, `desktop_app.py`, `update_converter.py`, четыре CLI-скрипта, `requirements.txt` и README: запуск и сборка остаются на виду.
+- `craft_converter/` — вспомогательные модули, каркасы графа Premiere и встроенные Python-ресурсы EffectCraft; это не отдельные команды.
+- `resources/shortcuts/` — обезличенные шаблоны горячих клавиш, которые включаются в EXE и автообновления исходников.
+- `effectcraft_plugins/` — готовые WASM, манифесты и исходники AssemblyScript; `tools/` — сборка эффектов; `tests/` — проверки.
+- `uploads/` — исключённые из Git пользовательские файлы и результаты: обновление исходников их не перемещает.
 
 ## Запуск из исходников в Windows
 
@@ -153,6 +171,8 @@ py -3 desktop_app.py
 При наличии Python 3.10+ батник вызывает `update_converter.py`: проверяет **все ветки этого репозитория** и выбирает ту, у которой самый поздний *коммит по дате коммиттера* (это не обязательно `main`). Затем скачивает ZIP исходников именно этого коммита с GitHub и запускает обновлённый код. Проверка проводится при каждом запуске; Git и аккаунт GitHub не нужны. Используйте такой режим, только если доверяете всем, кто может публиковать ветки в репозитории.
 
 Версии сохраняются в `%LOCALAPPDATA%\FilmCraftConverter\source-updates\versions\<commit>`. Исходная папка, батник, EXE, пользовательские проекты и профили клавиш **не перезаписываются**. Если GitHub недоступен, исчерпан лимит API или обновление повреждено, запускается последняя сохранённая версия (либо локальные исходники). Чтобы запустить локальную версию без проверки сети, задайте `FILMCRAFT_SKIP_UPDATE=1`. Из-за лимита GitHub API без авторизации проверяются репозитории не более чем с 40 ветками; при превышении лимита используется резервная версия.
+
+**Однократный переход:** прежний `update_converter.py` извлекал только файлы из корня и не может установить новую вложенную структуру; автообновление не заменяет его локальную копию. Один раз обновите исходную папку из ветки с этой реорганизацией (`git pull` в этой ветке или новый ZIP исходников), затем снова запустите `Start_Converter.bat`. Сохраните свои `uploads/` и EXE, не переносите пользовательские файлы в Git.
 
 Это обновление **только исходников**: зависимости (PySide6, flatbuffers для редактируемых титров и Pillow для PNG) автоматически не устанавливаются. После обновления исходников при необходимости выполните `py -3 -m pip install -r requirements.txt`. Готовый EXE не скачивается и не пересобирается автоматически; для него повторно запустите `Build_Windows_EXE.bat` или публикуйте отдельный бинарный релиз.
 
@@ -186,11 +206,11 @@ py -3 aex_to_effectcraft.py "C:\path\Deep Glow.aex" "C:\path\DeepGlow_effectcraf
 
 Pixel Sorter использует 18 собственных параметров. Независимый аналог Deep Glow — 14 параметров: радиус, экспозиция, порог, многомасштабное свечение, окраска и расширение альфа-канала; он использует CPU-размытие, а не закрытую OpenGL-реализацию Deep Glow 2. Совпадение с оригиналом **не подтверждено**: исходные пресеты/внешние входы/GPU-возможности/лицензия не переносятся. **Сам EffectCraft здесь не запускался**; ABI и обработка кадров обоих WASM проверены в Node.js и Wasmtime. Загрузку в EffectCraft и сходство с AE нужно проверить отдельно.
 
-Исходники AssemblyScript, манифесты и готовые WASM лежат в `effectcraft_plugins/`; `effectcraft_pixel_sorter.py` и `effectcraft_deep_glow.py` встраивают их в Python/EXE для обновлений исходников без компилятора. Для **пересборки** (пользователю не требуется): `npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20`, затем `python3 tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc` или `python3 tools/build_deep_glow.py --asc .venv/wasm-tools/node_modules/.bin/asc` (Windows: `asc.cmd`). Проверки: `node tests/effectcraft_wasm_smoke.cjs`, `node tests/deep_glow_wasm_smoke.cjs` и Python-тесты.
+Исходники AssemblyScript, манифесты и готовые WASM лежат в `effectcraft_plugins/`; `craft_converter/effectcraft_pixel_sorter.py` и `craft_converter/effectcraft_deep_glow.py` встраивают их в Python/EXE для обновлений исходников без компилятора. Для **пересборки** (пользователю не требуется): `npm install --prefix .venv/wasm-tools --no-save assemblyscript@0.28.20`, затем `python3 tools/build_pixel_sorter.py --asc .venv/wasm-tools/node_modules/.bin/asc` или `python3 tools/build_deep_glow.py --asc .venv/wasm-tools/node_modules/.bin/asc` (Windows: `asc.cmd`). Проверки: `node tests/effectcraft_wasm_smoke.cjs`, `node tests/deep_glow_wasm_smoke.cjs` и Python-тесты.
 
 ## Ограничения FilmCraft → Premiere (экспериментально)
 
-Writer строит нативный граф ссылок **медиа → master clip → последовательность → дорожка → клип** по данным FC и назначает новые идентификаторы объектов Premiere. Поддержаны несколько последовательностей и дорожек, повторное использование медиа, базовые тайминги видео/аудио и вложенные последовательности с однозначным именем. Исходные медиа **не копируются**, а указываются путями из FC. Для клипа Graphic с **одним простым статичным слоем `graphic_text`** в компонент `AE.ADBE Text` записываются текст Unicode, имя шрифта, размер, заливка/обводка, выравнивание и базовые параметры положения: титр *предполагается редактируемым* в Premiere, а не отрисованным в картинку. Шрифт должен быть установлен на компьютере с Premiere; метрики и вёрстка могут отличаться. При нескольких слоях, анимации или неподдерживаемом стиле остаётся отдельный PNG рядом с `.prproj` (нужен Pillow); переносите PNG вместе с проектом. Если не установлен flatbuffers, также используется PNG. Установите зависимости: `py -3 -m pip install -r requirements.txt`. Оба небольших обезличенных каркаса адаптированы из публичных MIT-образцов (атрибуция в `premiere_seed.py` и `premiere_text_seed.py`); проекта Premiere с вашими медиа в них нет. Необязательная пустая оболочка даёт лишь две строки версии сборки и **не гарантирует** совместимость с вашей версией Premiere. **Нативный титр прошёл структурные тесты, проверку бинарных данных и таймлайна, но не проверку открытия, редактирования или рендера в Adobe Premiere.** Диагностика writer в отчёте пока на русском языке.
+Writer строит нативный граф ссылок **медиа → master clip → последовательность → дорожка → клип** по данным FC и назначает новые идентификаторы объектов Premiere. Поддержаны несколько последовательностей и дорожек, повторное использование медиа, базовые тайминги видео/аудио и вложенные последовательности с однозначным именем. Исходные медиа **не копируются**, а указываются путями из FC. Для клипа Graphic с **одним простым статичным слоем `graphic_text`** в компонент `AE.ADBE Text` записываются текст Unicode, имя шрифта, размер, заливка/обводка, выравнивание и базовые параметры положения: титр *предполагается редактируемым* в Premiere, а не отрисованным в картинку. Шрифт должен быть установлен на компьютере с Premiere; метрики и вёрстка могут отличаться. При нескольких слоях, анимации или неподдерживаемом стиле остаётся отдельный PNG рядом с `.prproj` (нужен Pillow); переносите PNG вместе с проектом. Если не установлен flatbuffers, также используется PNG. Установите зависимости: `py -3 -m pip install -r requirements.txt`. Оба небольших обезличенных каркаса адаптированы из публичных MIT-образцов (атрибуция в `craft_converter/premiere_seed.py` и `craft_converter/premiere_text_seed.py`); проекта Premiere с вашими медиа в них нет. Необязательная пустая оболочка даёт лишь две строки версии сборки и **не гарантирует** совместимость с вашей версией Premiere. **Нативный титр прошёл структурные тесты, проверку бинарных данных и таймлайна, но не проверку открытия, редактирования или рендера в Adobe Premiere.** Диагностика writer в отчёте пока на русском языке.
 
 CLI использует тот же прямой writer:
 
@@ -207,7 +227,7 @@ py -3 fcproj_to_prproj.py project.fcproj output.prproj --graphics png
 ## Проверки разработки
 
 ```powershell
-py -3 -m py_compile desktop_app.py aex_to_effectcraft.py effectcraft_pixel_sorter.py project_import.py prproj_to_fcproj.py fcproj_to_prproj.py direct_fc_to_prproj.py graphic_raster.py premiere_seed.py premiere_text.py premiere_text_seed.py reverse_project.py shortcut_converter.py update_converter.py
+py -3 -m compileall -q desktop_app.py update_converter.py aex_to_effectcraft.py fcproj_to_prproj.py prproj_to_fcproj.py shortcut_converter.py craft_converter
 py -3 -m unittest discover -s tests -v
 ```
 
@@ -216,6 +236,6 @@ GUI также нужно проверить на Windows с реальными 
 ## Чистота репозитория и приватность
 
 - Пользовательские проекты, результаты, профили горячих клавиш, сгенерированные `.wasm` и отчёты храните локально в `uploads/` или другой папке: они исключены из Git. Исключения — два небольших готовых эффекта: [Pixel Sorter](effectcraft_plugins/PixelSorter_EffectCraft.wasm) и [Deep Glow](effectcraft_plugins/DeepGlow_EffectCraft.wasm). Оригинальные `.aex` и установщик не добавляйте в репозиторий.
-- Шаблоны горячих клавиш очищены. Обезличенные каркасы Premiere адаптированы из публичных MIT-fixtures; источники, изменения и тексты лицензий указаны в `premiere_seed.py` и `premiere_text_seed.py`. Перед публикацией проверьте `git status` и добавляемые файлы.
+- Шаблоны горячих клавиш очищены. Обезличенные каркасы Premiere адаптированы из публичных MIT-fixtures; источники, изменения и тексты лицензий указаны в `craft_converter/premiere_seed.py` и `craft_converter/premiere_text_seed.py`. Перед публикацией проверьте `git status` и добавляемые файлы.
 - В исходниках не предполагаются токены, пользовательские пути или медиафайлы; перед push всё равно выполните финальную проверку.
 - Файла `LICENSE` нет. Выберите лицензию до заявления, что проект распространяется как open source; без лицензии действуют обычные ограничения авторского права.

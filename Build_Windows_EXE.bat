@@ -23,7 +23,7 @@ if errorlevel 1 (
 py -3 -m pip install --upgrade -r requirements.txt PyInstaller
 if errorlevel 1 goto :failed
 
-py -3 -m PyInstaller --clean --noconfirm --onefile --windowed --name FilmCraftConverter --add-data "Premiere_Shortcuts_Template.kys;." --add-data "FilmCraft_Shortcuts_Template.json;." desktop_app.py
+py -3 -m PyInstaller --clean --noconfirm --onefile --windowed --name FilmCraftConverter --add-data "resources\shortcuts\Premiere_Shortcuts_Template.kys;resources\shortcuts" --add-data "resources\shortcuts\FilmCraft_Shortcuts_Template.json;resources\shortcuts" desktop_app.py
 if errorlevel 1 goto :failed
 
 copy /y "dist\FilmCraftConverter.exe" "%~dp0FilmCraftConverter.exe" >nul

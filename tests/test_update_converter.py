@@ -1,6 +1,8 @@
 """Offline tests for the source-only GitHub updater."""
 import json
+import os
 import stat
+import subprocess
 import sys
 import tempfile
 import types
@@ -41,8 +43,10 @@ class UpdaterTests(unittest.TestCase):
         self.local = self.base / 'checkout'
         self.local.mkdir()
         for name in REQUIRED_FILES:
-            (self.local / name).write_text('print("local")\n' if name.endswith('.py') else 'old',
-                                           encoding='utf-8')
+            path = self.local / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('print("local")\n' if name.endswith('.py') else 'old',
+                            encoding='utf-8')
         (self.local / 'FilmCraftConverter.exe').write_bytes(b'local exe')
         (self.local / 'Start_Converter.bat').write_text('local launcher', encoding='utf-8')
         uploads = self.local / 'uploads'
@@ -95,6 +99,9 @@ class UpdaterTests(unittest.TestCase):
                                  get_latest=lambda: self.revision, download=self.download)
         self.assertEqual(selected, self.cache / 'versions' / SHA_NEW)
         self.assertEqual((selected / 'desktop_app.py').read_text(), 'print("updated")\n')
+        self.assertTrue((selected / 'craft_converter' / 'project_import.py').is_file())
+        self.assertTrue((selected / 'resources/shortcuts/FilmCraft_Shortcuts_Template.json').is_file())
+        self.assertFalse((selected / 'project_import.py').exists())
         self.assertTrue((selected / 'new_module.py').is_file())
         self.assertEqual((self.local / 'desktop_app.py').read_text(), 'print("local")\n')
         self.assertEqual((self.local / 'FilmCraftConverter.exe').read_bytes(), b'local exe')
@@ -139,33 +146,50 @@ class UpdaterTests(unittest.TestCase):
                 get_latest=lambda: self.fail('Network requested')),
                 self.local)
 
-    def test_source_archive_includes_embedded_premiere_graph_module(self):
+    def test_source_archive_preserves_package_and_shortcut_layout(self):
         repository = Path(__file__).resolve().parents[1]
         archive = self.base / 'current.zip'
         with zipfile.ZipFile(archive, 'w') as package:
-            for path in repository.glob('*.py'):
-                package.write(path, f'root/{path.name}')
+            for directory in (repository, repository / 'craft_converter'):
+                for path in directory.glob('*.py'):
+                    package.write(path, f'root/{path.relative_to(repository).as_posix()}')
             for name in REQUIRED_FILES:
                 if not name.endswith('.py'):
                     package.write(repository / name, f'root/{name}')
+            package.write(repository / 'effectcraft_plugins/DeepGlow_EffectCraft.wasm',
+                          'root/effectcraft_plugins/DeepGlow_EffectCraft.wasm')
+            package.writestr('root/tools/ignored.py', 'raise RuntimeError("tools are not needed")')
         output = self.base / 'installed'
         unpack_source(archive, output)
-        self.assertEqual((output / 'premiere_seed.py').read_bytes(),
-                         (repository / 'premiere_seed.py').read_bytes())
-        self.assertTrue((output / 'direct_fc_to_prproj.py').is_file())
-        self.assertTrue((output / 'graphic_raster.py').is_file())
-        self.assertTrue((output / 'premiere_text.py').is_file())
-        self.assertTrue((output / 'premiere_text_seed.py').is_file())
-        # Source-only updates must carry the offline WASM asset inside a root .py,
-        # without shipping the AssemblyScript toolchain or any .aex inputs.
-        self.assertEqual((output / 'effectcraft_pixel_sorter.py').read_bytes(),
-                         (repository / 'effectcraft_pixel_sorter.py').read_bytes())
-        self.assertEqual((output / 'effectcraft_deep_glow.py').read_bytes(),
-                         (repository / 'effectcraft_deep_glow.py').read_bytes())
-        self.assertTrue((output / 'aex_to_effectcraft.py').is_file())
+        self.assertEqual((output / 'craft_converter/premiere_seed.py').read_bytes(),
+                         (repository / 'craft_converter/premiere_seed.py').read_bytes())
+        for name in REQUIRED_FILES:
+            self.assertTrue((output / name).is_file(), name)
+        for name in ('direct_fc_to_prproj.py', 'graphic_raster.py', 'premiere_text.py',
+                     'premiere_text_seed.py', 'effectcraft_pixel_sorter.py',
+                     'effectcraft_deep_glow.py'):
+            self.assertFalse((output / name).exists(), name)
+            self.assertTrue((output / 'craft_converter' / name).is_file(), name)
+        # Embedded WASM is shipped as Python data in the internal package,
+        # without any binary build products, tools or .aex inputs.
+        for name in ('effectcraft_pixel_sorter.py', 'effectcraft_deep_glow.py'):
+            self.assertEqual((output / 'craft_converter' / name).read_bytes(),
+                             (repository / 'craft_converter' / name).read_bytes())
         self.assertFalse((output / 'effectcraft_plugins').exists())
+        self.assertFalse((output / 'tools').exists())
+        self.assertFalse((output / 'FilmCraft_Shortcuts_Template.json').exists())
         self.assertIn('Pillow', (output / 'requirements.txt').read_text(encoding='utf-8'))
         self.assertIn('flatbuffers', (output / 'requirements.txt').read_text(encoding='utf-8'))
+        # Import the unpacked source from outside the checkout, as the launcher
+        # does when it starts a cached copy; root-only imports would fail here.
+        env = os.environ.copy()
+        env.pop('PYTHONPATH', None)
+        subprocess.run([sys.executable, '-c',
+                        'import aex_to_effectcraft, fcproj_to_prproj, prproj_to_fcproj; '
+                        'import craft_converter.project_import; '
+                        'from pathlib import Path; '
+                        'assert Path("resources/shortcuts/Premiere_Shortcuts_Template.kys").is_file()'],
+                       cwd=output, env=env, check=True, capture_output=True)
 
     def test_archive_rejects_duplicate_and_symlink_and_bad_python(self):
         archive = self.base / 'source.zip'
@@ -189,6 +213,25 @@ class UpdaterTests(unittest.TestCase):
             package.writestr(link, 'other.py')
         with self.assertRaisesRegex(UpdateError, 'symlink'):
             unpack_source(archive, self.base / 'symlink')
+
+        make_archive(archive, files={'craft_converter/PROJECT_IMPORT.PY': 'print("duplicate")'})
+        with self.assertRaisesRegex(UpdateError, 'duplicate'):
+            unpack_source(archive, self.base / 'nested_duplicate')
+
+        with zipfile.ZipFile(archive, 'w') as package:
+            for name in REQUIRED_FILES - {'craft_converter/project_import.py'}:
+                package.writestr(f'root/{name}', 'print("ok")' if name.endswith('.py') else 'data')
+            link = zipfile.ZipInfo('root/craft_converter/project_import.py')
+            link.create_system = 3
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            package.writestr(link, '../desktop_app.py')
+        with self.assertRaisesRegex(UpdateError, 'symlink'):
+            unpack_source(archive, self.base / 'nested_symlink')
+
+        make_archive(archive, files={'../escaped.py': 'print("escape")'})
+        with self.assertRaisesRegex(UpdateError, 'Unsafe archive path'):
+            unpack_source(archive, self.base / 'traversal')
+        self.assertFalse((self.base / 'escaped.py').exists())
 
     def test_github_request_refuses_untrusted_hosts_without_network(self):
         with self.assertRaisesRegex(UpdateError, 'non-GitHub'):

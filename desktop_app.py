@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QProgressBar, QMessageBox, QAbstractItemView, QSizePolicy, QComboBox,
     QScrollArea, QCheckBox, QTabWidget,
 )
-from project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
-from reverse_project import ReportWriteError
+from craft_converter.project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
+from craft_converter.reverse_project import ReportWriteError
 from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
 from aex_to_effectcraft import UnsupportedAexError, convert_aex, inspect_aex, output_stem
 
@@ -170,8 +170,9 @@ def unique_path(directory: Path, stem: str, suffix: str) -> Path:
 
 
 def resource_path(name: str) -> Path:
-    base=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent))
-    return base/name
+    """Locate shortcut templates in source, cached updates and PyInstaller EXEs."""
+    base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
+    return base / 'resources' / 'shortcuts' / name
 
 
 class FeaturePage(QScrollArea):

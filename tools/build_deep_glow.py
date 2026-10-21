@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / 'effectcraft_plugins/deep_glow_manifest.json'
 TEMPLATE = ROOT / 'effectcraft_plugins/deep_glow.ts.in'
 WASM_FILE = ROOT / 'effectcraft_plugins/DeepGlow_EffectCraft.wasm'
-PYTHON_FILE = ROOT / 'effectcraft_deep_glow.py'
+PYTHON_FILE = ROOT / 'craft_converter/effectcraft_deep_glow.py'
 
 
 def build(compiler: str) -> None:

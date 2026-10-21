@@ -8,8 +8,8 @@ import struct
 import unittest
 import xml.etree.ElementTree as ET
 
-from premiere_text import NativeTextUnsupported, create_native_text
-from premiere_text_seed import load_text_seed_xml
+from craft_converter.premiere_text import NativeTextUnsupported, create_native_text
+from craft_converter.premiere_text_seed import load_text_seed_xml
 
 try:
     import flatbuffers  # noqa: F401 - dependency for encoding only

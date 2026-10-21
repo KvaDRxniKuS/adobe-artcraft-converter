@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / 'effectcraft_plugins/pixel_sorter_manifest.json'
 TEMPLATE = ROOT / 'effectcraft_plugins/pixel_sorter.ts.in'
-OUTPUT = ROOT / 'effectcraft_pixel_sorter.py'
+OUTPUT = ROOT / 'craft_converter/effectcraft_pixel_sorter.py'
 
 
 def build(compiler: str, *, output: Path = OUTPUT) -> None:

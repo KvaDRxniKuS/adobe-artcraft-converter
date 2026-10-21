@@ -389,7 +389,7 @@ def main() -> int:
     parser.add_argument('--graphics', choices=('native', 'png'), default='native',
                         help='Static Graphic text as editable native titles (default) or PNGs')
     args = parser.parse_args()
-    from reverse_project import convert_reverse_project
+    from craft_converter.reverse_project import convert_reverse_project
     output = args.output or args.input.with_suffix('.prproj')
     report, warnings = convert_reverse_project(args.input, output, shell=args.shell,
                                                 graphic_mode=args.graphics)

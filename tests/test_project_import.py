@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
-from project_import import (FC_TO_PR, PR_TO_FC, ProjectTypeError,
+from craft_converter.project_import import (FC_TO_PR, PR_TO_FC, ProjectTypeError,
                             convert_queued_project, detect_project_direction,
                             next_output_path)
 from test_reverse_writer import REFERENCE, SHELL, graphic_text_clip
@@ -158,7 +158,7 @@ class ProjectImportTests(unittest.TestCase):
                 'audio_tracks': [],
             }}}}}}
 
-        with patch('project_import.Converter') as converter_type:
+        with patch('craft_converter.project_import.Converter') as converter_type:
             converter_type.return_value.convert.side_effect = convert
             converter_type.return_value.warnings = ['review effect']
             output, messages = convert_queued_project(
