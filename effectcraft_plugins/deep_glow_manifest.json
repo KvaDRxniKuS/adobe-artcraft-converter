@@ -3,9 +3,9 @@
   "id": "org.artcraft_converter.deep_glow",
   "name": "Deep Glow (independent port)",
   "category": "Stylize",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "ArtCraft Converter contributors",
-  "description": "Independent multi-scale bloom effect. Not the AE Deep Glow algorithm or a binary translation.",
+  "description": "Independent multi-scale Gaussian-like bloom with rounded halos. Not the AE Deep Glow algorithm or a binary translation.",
   "params": [
     {"id": "radius", "name": "Radius (px)", "type": "slider", "default": 48, "min": 0, "max": 256, "decimals": 0},
     {"id": "exposure", "name": "Exposure (stops)", "type": "slider", "default": 1.5, "min": -4, "max": 5, "decimals": 1},

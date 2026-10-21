@@ -41,10 +41,11 @@ function clamped(v: i32, last: i32): i32 {
   return max<i32>(0, min<i32>(last, v));
 }
 
-// Separable sliding box blur. Edge samples are repeated. Every scale is O(pixels),
-// not O(radius * pixels), and only three RGB scratch buffers are allocated.
-function blurScale(src: i32, tmp: i32, sumBuf: i32, width: i32, height: i32,
-                   radius: i32, weight: f32): void {
+// Three inexpensive box passes approximate a Gaussian's radial falloff.
+// Every pass uses sliding sums (O(pixels) regardless of the radius). Repeating
+// the filter rounds the square footprint of a single horizontal+vertical box.
+function boxPass(src: i32, tmp: i32, dst: i32, width: i32, height: i32,
+                 radius: i32, weight: f32, accumulate: bool): void {
   let rx: i32 = min<i32>(radius, width - 1);
   let ry: i32 = min<i32>(radius, height - 1);
   let invX: f32 = 1.0 / <f32>((rx << 1) + 1);
@@ -68,10 +69,61 @@ function blurScale(src: i32, tmp: i32, sumBuf: i32, width: i32, height: i32,
       for (let k: i32 = -ry; k <= ry; k++)
         total += sample(tmp, clamped(k, height - 1) * width + x, c);
       for (let y: i32 = 0; y < height; y++) {
-        let at: i32 = pixelAt(sumBuf, y * width + x, c);
-        store<f32>(at, load<f32>(at) + total * invY * weight);
+        let at: i32 = pixelAt(dst, y * width + x, c);
+        let value: f32 = total * invY * weight;
+        if (accumulate) value += load<f32>(at);
+        store<f32>(at, value);
         total += sample(tmp, clamped(y + ry + 1, height - 1) * width + x, c)
                - sample(tmp, clamped(y - ry, height - 1) * width + x, c);
+      }
+    }
+  }
+}
+
+// At one-to-three pixel radii the integer box widths quantize poorly; at
+// radius one they even collapse back to a single square box. Use a normalized
+// separable Gaussian instead.
+// Its weights are calculated once per scale, never inside the pixel loops.
+function smallGaussian(src: i32, tmp: i32, dst: i32, weights: i32,
+                       width: i32, height: i32, radius: i32, gain: f32): void {
+  let sigma2: f64 = <f64>radius * <f64>(radius + 1) / 3.0;
+  let support: i32 = min<i32>(8, <i32>Math.ceil(3.0 * Math.sqrt(sigma2)));
+  let norm: f64 = 1.0;
+  for (let k: i32 = 1; k <= support; k++) {
+    let w: f64 = Math.exp(-<f64>(k * k) / (2.0 * sigma2));
+    store<f32>(weights + (k << 2), <f32>w);
+    norm += 2.0 * w;
+  }
+  store<f32>(weights, <f32>(1.0 / norm));
+  for (let k: i32 = 1; k <= support; k++) {
+    store<f32>(weights + (k << 2), load<f32>(weights + (k << 2)) * load<f32>(weights));
+  }
+  for (let y: i32 = 0; y < height; y++) {
+    let row: i32 = y * width;
+    for (let x: i32 = 0; x < width; x++) {
+      for (let c: i32 = 0; c < 3; c++) {
+        let value: f32 = sample(src, row + x, c) * load<f32>(weights);
+        for (let k: i32 = 1; k <= support; k++) {
+          let w: f32 = load<f32>(weights + (k << 2));
+          value += w * (sample(src, row + clamped(x - k, width - 1), c)
+                      + sample(src, row + clamped(x + k, width - 1), c));
+        }
+        store<f32>(pixelAt(tmp, row + x, c), value);
+      }
+    }
+  }
+  for (let y: i32 = 0; y < height; y++) {
+    for (let x: i32 = 0; x < width; x++) {
+      let i: i32 = y * width + x;
+      for (let c: i32 = 0; c < 3; c++) {
+        let value: f32 = sample(tmp, i, c) * load<f32>(weights);
+        for (let k: i32 = 1; k <= support; k++) {
+          let w: f32 = load<f32>(weights + (k << 2));
+          value += w * (sample(tmp, clamped(y - k, height - 1) * width + x, c)
+                      + sample(tmp, clamped(y + k, height - 1) * width + x, c));
+        }
+        let at: i32 = pixelAt(dst, i, c);
+        store<f32>(at, load<f32>(at) + value * gain);
       }
     }
   }
@@ -83,12 +135,14 @@ export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
     return 1;
   let n: i32 = width * height;
   if (params < HOST_BUFFER || pixels < params + nparams * 8 || pixels < HOST_BUFFER
-      || pixels > MAX_BYTES - n * 52 || pixels + n * 16 > memory.size() * 65536)
+      || pixels > MAX_BYTES - n * 64 - 64 || pixels + n * 16 > memory.size() * 65536)
     return 2;
-  if (!growTo(pixels + n * 52)) return 3;
+  if (!growTo(pixels + n * 64 + 64)) return 3;
   let bright: i32 = pixels + n * 16;
   let temp: i32 = bright + n * 12;
-  let accum: i32 = temp + n * 12;
+  let filtered: i32 = temp + n * 12;
+  let accum: i32 = filtered + n * 12;
+  let weights: i32 = accum + n * 12; // 64 bytes for tiny Gaussian kernels.
   let radius: f64 = param(params, 0, 0.0, 256.0, 48.0);
   let exposure: f64 = param(params, 1, -4.0, 5.0, 1.5);
   let threshold: f32 = <f32>(param(params, 2, 0.0, 100.0, 60.0) / 100.0);
@@ -136,12 +190,42 @@ export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
     let weight: f32 = level == 0 ? 1.0 : <f32>(spread * (1.0 - 0.15 * level));
     totalWeight += weight;
   }
-  for (let level: i32 = 0; level < levels; level++) {
-    let weight: f32 = level == 0 ? 1.0 : <f32>(spread * (1.0 - 0.15 * level));
-    // Normal, Draft and High share the same radii on common scales.
-    let divisor: i32 = 8 >> level;
-    let step: i32 = r == 0 ? 0 : max<i32>(1, <i32>Math.round(<f64>r / divisor));
-    blurScale(bright, temp, accum, width, height, step, weight / totalWeight);
+  if (r == 0) {
+    // Radius zero should be an exact no-blur identity, independent of quality.
+    for (let i: i32 = 0; i < n; i++) {
+      for (let c: i32 = 0; c < 3; c++)
+        store<f32>(pixelAt(accum, i, c), sample(bright, i, c));
+    }
+  } else {
+    for (let level: i32 = 0; level < levels; level++) {
+      let weight: f32 = level == 0 ? 1.0 : <f32>(spread * (1.0 - 0.15 * level));
+      if (weight <= 0.0) continue;
+      // Normal, Draft and High share the same radii on common scales.
+      let divisor: i32 = 8 >> level;
+      let step: i32 = max<i32>(1, <i32>Math.round(<f64>r / divisor));
+      let gain: f32 = weight / totalWeight;
+      if (step <= 3) {
+        smallGaussian(bright, temp, accum, weights, width, height, step, gain);
+        continue;
+      }
+      // Variance of the previous box with radius `step` is step*(step+1)/3.
+      // Three odd-width boxes approximate that variance while softening the
+      // square cutoff. Select the lower/upper widths to keep the same radius
+      // control without paying O(radius * pixels) for large Gaussian kernels.
+      let variance: f64 = <f64>step * <f64>(step + 1) / 3.0;
+      let lowerWidth: i32 = <i32>Math.floor(Math.sqrt(4.0 * variance + 1.0));
+      if ((lowerWidth & 1) == 0) lowerWidth--;
+      let narrowCount: i32 = clamped(<i32>Math.round(
+        (12.0 * variance - 3.0 * lowerWidth * lowerWidth - 12.0 * lowerWidth - 9.0)
+        / (-4.0 * lowerWidth - 4.0)), 3);
+      for (let pass: i32 = 0; pass < 3; pass++) {
+        let boxRadius: i32 = (lowerWidth - 1) / 2 + (pass < narrowCount ? 0 : 1);
+        let input: i32 = pass == 0 ? bright : filtered;
+        let output: i32 = pass == 2 ? accum : filtered;
+        boxPass(input, temp, output, width, height, boxRadius,
+                pass == 2 ? gain : 1.0, pass == 2);
+      }
+    }
   }
 
   let gain: f32 = <f32>Math.pow(2.0, exposure) * mix;

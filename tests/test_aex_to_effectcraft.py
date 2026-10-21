@@ -94,8 +94,11 @@ class AexTests(unittest.TestCase):
         report = convert_aex(self.source, self.output, language='en')
         self.assertEqual(self.output.read_bytes(), GLOW_WASM)
         self.assertNotEqual(self.output.read_bytes(), WASM)
-        self.assertIn('multi-scale bloom', report.read_text(encoding='utf-8'))
-        self.assertIn('NOT the original', report.read_text(encoding='utf-8'))
+        report_text = report.read_text(encoding='utf-8')
+        self.assertIn('multi-scale bloom', report_text)
+        self.assertIn('Gaussian-like', report_text)
+        self.assertIn('Quit EffectCraft', report_text)
+        self.assertIn('NOT the original', report_text)
         self.assertNotIn(b'Deep Glow 2\0', self.output.read_bytes())
 
     def test_unknown_effect_is_analyzed_without_faking_a_wasm(self):

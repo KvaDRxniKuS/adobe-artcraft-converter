@@ -15,6 +15,7 @@ const manifest = JSON.parse(Buffer.from(instance.memory.buffer,
   instance.ec_manifest_ptr(), instance.ec_manifest_len()).toString('utf8'));
 assert.equal(manifest.id, 'org.artcraft_converter.deep_glow');
 assert.equal(manifest.api, 1);
+assert.equal(manifest.version, '0.2.0');
 assert.equal(manifest.params.length, 14);
 const index = Object.fromEntries(manifest.params.map((p, n) => [p.id, n]));
 
@@ -86,6 +87,40 @@ assert.ok(output[cy * w + cx + 1][0] > lowExposure[cy * w + cx + 1][0]);
 const draft = render(image, w, h, {...controls, quality: 0, radius: 12});
 const high = render(image, w, h, {...controls, quality: 2, radius: 12});
 assert.ok(high[cy * w + cx + 7][0] > draft[cy * w + cx + 7][0], 'more scales spread further');
+
+// An isolated highlight must produce a smoothly fading, nearly circular halo.
+// A single horizontal+vertical box blur has a flat square: it abruptly drops
+// to zero on an axis while still glowing in the diagonal corner at that radius.
+const haloSize = 81, haloCenter = 40;
+const halo = render(impulse(haloSize, haloSize, haloCenter, haloCenter), haloSize, haloSize,
+  {radius: 64, spread: 0, quality: 0, blend_mode: 2, exposure: 0,
+   threshold: 50, threshold_smooth: 0, source_opacity: 0});
+const at = (dx, dy) => halo[(haloCenter + dy) * haloSize + haloCenter + dx][0];
+assert.ok(at(0, 0) > at(5, 0) && at(5, 0) > at(10, 0) && at(10, 0) > 0,
+          'large-scale halo must fade gradually beyond the old square cutoff');
+const axis = at(10, 0), diagonal = at(7, 7);
+assert.ok(Math.abs(axis - diagonal) / Math.max(axis, diagonal) < 0.25,
+          'points at comparable radial distances should receive comparable glow');
+const totalGlow = halo.reduce((sum, pixel) => sum + pixel[0], 0);
+nearly(totalGlow, 1, 0.001); // Unit impulse energy is conserved away from borders.
+
+// The default mix of blur scales must not reintroduce the square outline.
+const mixedSize = 129, mixedCenter = 64;
+const mixed = render(impulse(mixedSize, mixedSize, mixedCenter, mixedCenter),
+  mixedSize, mixedSize, {radius: 48, quality: 1, exposure: 0, blend_mode: 2,
+                        threshold: 50, threshold_smooth: 0, source_opacity: 0});
+const mixedAxis = mixed[mixedCenter * mixedSize + mixedCenter + 30][0];
+const mixedDiagonal = mixed[(mixedCenter + 21) * mixedSize + mixedCenter + 21][0];
+assert.ok(mixedAxis > 0 && mixedDiagonal > 0);
+assert.ok(Math.abs(mixedAxis - mixedDiagonal) / Math.max(mixedAxis, mixedDiagonal) < 0.25,
+          'default multi-scale halo must be approximately circular');
+
+const tinyHalo = render(impulse(21, 21, 10, 10), 21, 21,
+  {radius: 8, spread: 0, quality: 0, blend_mode: 2, exposure: 0,
+   threshold: 50, threshold_smooth: 0, source_opacity: 0});
+const smallAt = x => tinyHalo[10 * 21 + 10 + x][0];
+assert.ok(smallAt(0) > smallAt(1) && smallAt(1) > smallAt(2) && smallAt(2) > 0,
+          'even a one-pixel scale must have a soft, non-square tail');
 
 // Premultiplied transparent input must never emit light. Soft-knee, tiny frames,
 // high bit depth and variable preview scale are also exercised.

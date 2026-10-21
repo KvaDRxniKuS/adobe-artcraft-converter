@@ -26,6 +26,7 @@ class DeepGlowTests(unittest.TestCase):
         packed = json.dumps(MANIFEST, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.assertEqual(hashlib.sha256(packed).hexdigest(), MANIFEST_SHA256)
         self.assertEqual(MANIFEST['api'], 1)
+        self.assertEqual(MANIFEST['version'], '0.2.0')
         self.assertEqual(MANIFEST['category'], 'Stylize')
         self.assertRegex(MANIFEST['id'], r'^[A-Za-z0-9_.-]+$')
         names = [p['id'] for p in MANIFEST['params']]
@@ -60,24 +61,26 @@ class DeepGlowTests(unittest.TestCase):
         module = wasmtime.Module(engine, WASM)
         self.assertEqual(list(module.imports), [])
         for side in (1, 8, 32, 128):
-            with self.subTest(side=side):
-                store = wasmtime.Store(engine)
-                budget = 50_000_000 + 20_000 * side * side
-                store.set_fuel(budget)
-                exp = wasmtime.Instance(store, module, []).exports(store)
-                memory = exp['memory']
-                params = [float(p['default']) for p in MANIFEST['params']]
-                frame = b''.join(struct.pack('<4f', *( (1., 1., 1., 1.)
-                                                        if i == (side * side) // 2
-                                                        else (0., 0., 0., 0.)))
-                                 for i in range(side * side))
-                data = b''.join(struct.pack('<d', v) for v in params) + frame
-                base = exp['ec_alloc'](store, len(data))
-                memory.write(store, data, base)
-                result = exp['ec_render'](store, base + len(params)*8, side, side,
-                                          base, len(params), 0., 1.)
-                self.assertEqual(result, 0)
-                self.assertGreater(store.get_fuel(), 0)
+            for radius, quality in ((48, 1), (256, 2), (8, 2)):
+                with self.subTest(side=side, radius=radius, quality=quality):
+                    store = wasmtime.Store(engine)
+                    budget = 50_000_000 + 20_000 * side * side
+                    store.set_fuel(budget)
+                    exp = wasmtime.Instance(store, module, []).exports(store)
+                    memory = exp['memory']
+                    params = [float(p['default']) for p in MANIFEST['params']]
+                    params[0], params[13] = radius, quality
+                    frame = b''.join(struct.pack('<4f', *((1., 1., 1., 1.)
+                                                           if i == (side * side) // 2
+                                                           else (0., 0., 0., 0.)))
+                                     for i in range(side * side))
+                    data = b''.join(struct.pack('<d', v) for v in params) + frame
+                    base = exp['ec_alloc'](store, len(data))
+                    memory.write(store, data, base)
+                    result = exp['ec_render'](store, base + len(params)*8, side, side,
+                                              base, len(params), 0., 1.)
+                    self.assertEqual(result, 0)
+                    self.assertGreater(store.get_fuel(), 0)
 
     @unittest.skipUnless(REAL_GLOW.is_file(), 'User-provided binary only exists in Arena session')
     def test_actual_user_deep_glow_static_recognition_and_conversion(self):
