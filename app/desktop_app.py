@@ -113,8 +113,13 @@ TEXT = {
         'plugin_glow_summary':'Созданы WASM и скрипт «apply_with_bounds.jsx» для ореола за границами футажа; настройки и ограничения — в отчёте.',
         'plugin_analyzed':'Анализ завершён · WASM не создан',
         'plugin_no_port':'Этот .aex изучен, но для его эффекта пока нет самостоятельной реализации. WASM не создавался.\nДиагностика: {report}',
-        'plugin_local_title':'ЛОКАЛЬНЫЙ МАСТЕР · ИЗМЕРЕНИЕ ЦВЕТА',
-        'plugin_local_note':'Необязательно: выберите папку, подготовьте 2 картинки, обработайте ОБЕ в установленном AE с одинаковыми настройками эффекта и положите PNG-результаты в ту же папку. Затем нажмите «Измерить и создать WASM». Только цветовые попиксельные эффекты, один набор настроек; с полем Deep Glow «Снимок чисел» не совмещать.',
+        'plugin_local_title':'ЛОКАЛЬНЫЙ МАСТЕР · ИЗМЕРЕНИЕ ПО КАДРАМ',
+        'plugin_local_note':'Необязательно: подготовьте 2 картинки, обработайте ОБЕ в AE при одних настройках и сохраните PNG в ту же папку. Выберите модель: цветовая LUT или экспериментальный прямой луч с белой сердцевиной на непрозрачном фоне. Маски, текст и анимация луча не переносятся. Не совмещать со «Снимком чисел» Deep Glow.',
+        'plugin_model_colour':'Попиксельный цвет · 3D-таблица',
+        'plugin_model_line':'Прямой светящийся луч · процедурно (эксперимент)',
+        'plugin_fit_line':'2. Измерить луч и создать WASM',
+        'plugin_line_summary':'Создан отдельный процедурный прямой луч с настраиваемыми точками. Это НЕ оригинальный алгоритм AE; ошибки и ограничения — в отчёте.',
+        'plugin_line_rejected':'Прямая линия с гауссовым свечением не подтвердилась на проверочном кадре; WASM не создан. Отчёт: {report}',
         'plugin_local_folder':'Папка с chart_training_ae.png и chart_check_ae.png',
         'plugin_local_choose':'Папка для тестовых кадров AE',
         'plugin_local_folder_error':'Нужна одна существующая локальная папка.',
@@ -216,8 +221,13 @@ TEXT = {
         'plugin_glow_summary':'WASM plus apply_with_bounds.jsx script for halos beyond footage; settings and limits are in the report.',
         'plugin_analyzed':'Analysis complete · no WASM created',
         'plugin_no_port':'This .aex was analyzed, but its effect has no independent implementation yet. No WASM was created.\nDiagnostics: {report}',
-        'plugin_local_title':'LOCAL WIZARD · COLOUR MEASUREMENT',
-        'plugin_local_note':'Optional: choose a folder and prepare two charts. Render BOTH in installed AE with the SAME effect settings, save the two PNG results in that folder, then click Fit and create WASM. Pixel-local colour effects only, one fixed preset; do not combine with the Deep Glow numeric snapshot.',
+        'plugin_local_title':'LOCAL WIZARD · REFERENCE MEASUREMENT',
+        'plugin_local_note':'Optional: render BOTH charts in AE at ONE setting and save the two PNGs in the same folder. Select either the pixel-local colour LUT or the experimental opaque straight white-core beam. Masks, text and animation are not carried over; do not combine with the Deep Glow numeric snapshot.',
+        'plugin_model_colour':'Pixel-local colour · 3D LUT',
+        'plugin_model_line':'Straight glowing beam · procedural (experimental)',
+        'plugin_fit_line':'2. Fit beam and create WASM',
+        'plugin_line_summary':'Independent procedural straight beam with adjustable endpoints. NOT the original AE algorithm; see measured errors and limitations in the report.',
+        'plugin_line_rejected':'A straight Gaussian-glow line did not validate on the check frame; no WASM was created. Report: {report}',
         'plugin_local_folder':'Folder with chart_training_ae.png and chart_check_ae.png',
         'plugin_local_choose':'Folder for AE reference frames',
         'plugin_local_folder_error':'Select one existing local folder.',
@@ -599,6 +609,9 @@ class AexConverterPanel(FileConverterPanel):
         self.reference_note.setWordWrap(True)
         reference_layout.addWidget(self.reference_title)
         reference_layout.addWidget(self.reference_note)
+        self.reference_model = QComboBox()
+        self.reference_model.addItems(['', ''])
+        reference_layout.addWidget(self.reference_model)
         self.reference_edit, self.reference_btn = self.file_row(
             reference_layout, self.accept_reference_folders)
         self.reference_btn.clicked.connect(self.choose_reference_dir)
@@ -607,11 +620,13 @@ class AexConverterPanel(FileConverterPanel):
         reference_layout.addWidget(self.prepare_btn)
         self.details_layout.addWidget(reference_panel)
         self.reference_edit.textChanged.connect(self.update_convert_label)
+        self.reference_model.currentIndexChanged.connect(self.update_convert_label)
         self.retranslate()
 
     def update_convert_label(self, *_):
-        self.run_btn.setText(tr(self.language, 'plugin_fit' if
-                                self.reference_edit.text().strip() else 'plugin_convert'))
+        key = ('plugin_fit_line' if self.reference_model.currentIndex() == 1
+               else 'plugin_fit') if self.reference_edit.text().strip() else 'plugin_convert'
+        self.run_btn.setText(tr(self.language, key))
 
     def retranslate(self):
         self.drop.language = self.language
@@ -631,6 +646,8 @@ class AexConverterPanel(FileConverterPanel):
         self.values_hint.setText(tr(self.language, 'plugin_values_hint'))
         self.reference_title.setText(tr(self.language, 'plugin_local_title'))
         self.reference_note.setText(tr(self.language, 'plugin_local_note'))
+        self.reference_model.setItemText(0, tr(self.language, 'plugin_model_colour'))
+        self.reference_model.setItemText(1, tr(self.language, 'plugin_model_line'))
         self.reference_edit.setPlaceholderText(tr(self.language, 'plugin_local_folder'))
         self.reference_btn.setText(tr(self.language, 'browse'))
         self.prepare_btn.setText(tr(self.language, 'plugin_prepare'))
@@ -789,12 +806,15 @@ class AexConverterPanel(FileConverterPanel):
             profile_text = self.profile_edit.text().strip()
             values_text = self.values_edit.text().strip()
             reference_text = self.reference_edit.text().strip()
+            is_line = bool(reference_text) and self.reference_model.currentIndex() == 1
             report = convert_aex(source, output, language=self.language,
                                  ae_profile=Path(profile_text) if profile_text else None,
                                  ae_values=Path(values_text) if values_text else None,
-                                 reference_dir=Path(reference_text) if reference_text else None)
+                                 reference_dir=Path(reference_text) if reference_text else None,
+                                 reference_model='line' if is_line else 'colour')
             self.set_status('done', name=output.name)
-            summary_key = ('plugin_local_summary' if reference_text else
+            summary_key = ('plugin_line_summary' if is_line else
+                           'plugin_local_summary' if reference_text else
                            'plugin_glow_summary' if family == 'deep_glow' else
                            'plugin_pixel_summary')
             QMessageBox.information(
@@ -803,7 +823,10 @@ class AexConverterPanel(FileConverterPanel):
                    summary=tr(self.language, summary_key), report=report))
         except UnsupportedAexError as exc:
             self.set_status('plugin_analyzed')
-            key = 'plugin_local_rejected' if self.reference_edit.text().strip() else 'plugin_no_port'
+            key = ('plugin_line_rejected' if self.reference_edit.text().strip() and
+                   self.reference_model.currentIndex() == 1 else
+                   'plugin_local_rejected' if self.reference_edit.text().strip() else
+                   'plugin_no_port')
             QMessageBox.warning(self, tr(self.language, 'plugin_analyzed'),
                                 tr(self.language, key, report=exc.report))
         except Exception as exc:

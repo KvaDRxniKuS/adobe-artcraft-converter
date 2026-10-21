@@ -1,0 +1,107 @@
+// Reusable procedural line+Gaussian-glow kernel for EffectCraft WASM API v1.
+// Calibrated from AE-rendered PNGs; it never executes or embeds an .aex or frame.
+const MANIFEST_PTR: usize = memory.data<u8>([__MANIFEST_BYTES__]);
+const MANIFEST_LEN: i32 = __MANIFEST_LEN__;
+const SLOT_PTR: usize = memory.data<u8>([__SLOT_BYTES__]);
+const WEIGHTS_PTR: i32 = <i32>SLOT_PTR + __PREFIX_LEN__;
+const HOST_BUFFER: i32 = 65536;
+const MAX_PIXELS: i32 = 9000000;
+
+export function ec_api_version(): i32 { return 1; }
+export function ec_manifest_ptr(): i32 { return <i32>MANIFEST_PTR; }
+export function ec_manifest_len(): i32 { return MANIFEST_LEN; }
+
+export function ec_alloc(bytes: i32): i32 {
+  if (bytes <= 0 || bytes > MAX_PIXELS * 16 + 1024) return 0;
+  let pages: i32 = (HOST_BUFFER + bytes + 65535) >> 16;
+  if (pages > memory.size() && memory.grow(pages - memory.size()) < 0) return 0;
+  return HOST_BUFFER;
+}
+
+function bounded(n: f64, lo: f64, hi: f64): f64 {
+  if (n != n || n < -1.0e10 || n > 1.0e10) return lo;
+  return max<f64>(lo, min<f64>(hi, n));
+}
+function sigma(index: i32): f64 {
+  if (index == 0) return 3.0;
+  if (index == 1) return 8.0;
+  if (index == 2) return 25.0;
+  if (index == 3) return 70.0;
+  return 220.0;
+}
+function erfApprox(n: f64): f64 {
+  // Abramowitz-Stegun 7.1.26: error below 1.5e-7 on real inputs.
+  if (n > 5.0) return 1.0;
+  if (n < -5.0) return -1.0;
+  let sign: f64 = n < 0 ? -1.0 : 1.0;
+  let a: f64 = Math.abs(n);
+  let t: f64 = 1.0 / (1.0 + 0.3275911 * a);
+  let polynomial: f64 = (((((1.061405429 * t - 1.453152027) * t + 1.421413741)
+                        * t - 0.284496736) * t + 0.254829592) * t);
+  return sign * (1.0 - polynomial * Math.exp(-a * a));
+}
+
+export function ec_render(pixels: i32, width: i32, height: i32, params: i32,
+                          nparams: i32, time: f64, scale: f64): i32 {
+  // Two points = four f64s; radius, RGBA core, size, brightness, mix = eight more.
+  if (nparams != 12 || width <= 0 || height <= 0 || width > MAX_PIXELS / height) return 1;
+  let size: i32 = width * height * 16;
+  if (params < HOST_BUFFER || pixels < params + 96 || pixels < HOST_BUFFER ||
+      pixels > memory.size() * 65536 - size) return 2;
+  let sx: f64 = bounded(load<f64>(params), -100000.0, 100000.0);
+  let sy: f64 = bounded(load<f64>(params + 8), -100000.0, 100000.0);
+  let ex: f64 = bounded(load<f64>(params + 16), -100000.0, 100000.0);
+  let ey: f64 = bounded(load<f64>(params + 24), -100000.0, 100000.0);
+  let dx: f64 = ex - sx, dy: f64 = ey - sy;
+  let length: f64 = Math.sqrt(dx * dx + dy * dy);
+  if (length < 1.0) return 3;
+  let core: f64 = bounded(load<f64>(params + 32), 0.0, 128.0);
+  let cr: f64 = bounded(load<f64>(params + 40), 0.0, 1.0);
+  let cg: f64 = bounded(load<f64>(params + 48), 0.0, 1.0);
+  let cb: f64 = bounded(load<f64>(params + 56), 0.0, 1.0);
+  let ca: f64 = bounded(load<f64>(params + 64), 0.0, 1.0);
+  let glowSize: f64 = bounded(load<f64>(params + 72), 0.0, 500.0) / 100.0;
+  let brightness: f64 = bounded(load<f64>(params + 80), 0.0, 500.0) / 100.0;
+  let mix: f64 = bounded(load<f64>(params + 88), 0.0, 100.0) / 100.0;
+  if (mix == 0.0) return 0;
+  let scaled: f64 = bounded(scale, 0.01, 8.0);
+  core *= scaled;
+  for (let y: i32 = 0; y < height; y++) {
+    for (let x: i32 = 0; x < width; x++) {
+      let p: i32 = pixels + (y * width + x) * 16;
+      let ox: f64 = <f64>x + 0.5 - sx;
+      let oy: f64 = <f64>y + 0.5 - sy;
+      let along: f64 = (ox * dx + oy * dy) / length;
+      let distance: f64 = Math.abs((ox * dy - oy * dx) / length);
+      let red: f64 = 0.0, green: f64 = 0.0, blue: f64 = 0.0;
+      if (glowSize > 0.0) {
+        for (let j: i32 = 0; j < 5; j++) {
+          let sd: f64 = sigma(j) * glowSize * scaled;
+          let along_factor: f64 = 0.5 * (erfApprox(along / (1.4142135623730951 * sd))
+                            - erfApprox((along - length) / (1.4142135623730951 * sd)));
+          let feature: f64 = Math.exp(-0.5 * (distance / sd) * (distance / sd)) * along_factor;
+          red += <f64>load<f32>(WEIGHTS_PTR + j * 4) * feature;
+          green += <f64>load<f32>(WEIGHTS_PTR + (5 + j) * 4) * feature;
+          blue += <f64>load<f32>(WEIGHTS_PTR + (10 + j) * 4) * feature;
+        }
+      }
+      let end_weight: f64 = max<f64>(0.0, min<f64>(1.0, along + 1.0)) *
+                            max<f64>(0.0, min<f64>(1.0, length - along + 1.0));
+      let core_weight: f64 = max<f64>(0.0, min<f64>(1.0, core - distance + 0.5)) *
+                             end_weight * ca;
+      for (let c: i32 = 0; c < 3; c++) {
+        let value: f64 = c == 0 ? red : (c == 1 ? green : blue);
+        let core_colour: f64 = c == 0 ? cr : (c == 1 ? cg : cb);
+        let target: f64 = max<f64>(0.0, min<f64>(1.0,
+          (value / 255.0 * (1.0 - core_weight) + core_colour * core_weight) * brightness));
+        let before: f32 = load<f32>(p + c * 4);
+        store<f32>(p + c * 4, <f32>(<f64>before * (1.0 - mix) + target * mix));
+      }
+      // The fitted examples have an opaque black base. No unobserved alpha/mask
+      // behavior is claimed; Mix blends toward the opaque generated frame.
+      let old_alpha: f32 = load<f32>(p + 12);
+      store<f32>(p + 12, <f32>(<f64>old_alpha * (1.0 - mix) + mix));
+    }
+  }
+  return 0;
+}

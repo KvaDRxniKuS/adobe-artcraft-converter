@@ -496,7 +496,16 @@ class MixedQueueUITests(unittest.TestCase):
             info.assert_called_once()
         self.assertTrue(output.is_file())
         self.assertIn('Mix', output.with_name('colour_port_conversion_report.md').read_text())
+        panel.reference_model.setCurrentIndex(1)
+        self.assertIn('луч', panel.run_btn.text())
+        panel.output_edit.setText(str(self.source.with_name('not_a_beam.wasm')))
+        with patch.object(QMessageBox, 'warning') as warning:
+            panel.convert()  # The same colour inversion must NOT be accepted as a line.
+            warning.assert_called_once()
+        self.assertFalse(self.source.with_name('not_a_beam.wasm').exists())
         self.window.language_combo.setCurrentIndex(1)
+        self.assertIn('Fit beam', panel.run_btn.text())
+        panel.reference_model.setCurrentIndex(0)
         self.assertIn('Fit and create', panel.run_btn.text())
         panel.accept_files([str(source)])  # Changing inputs must clear stale AE references.
         self.assertEqual(panel.reference_edit.text(), '')

@@ -51,6 +51,10 @@ the .aep itself does not contain a portable renderer and is not read here.
 Run the converter with --reference-dir pointing to THIS folder. It verifies
 unseen colours/edges and writes a WASM only if the error is low enough. The
 WASM has a Mix control, NOT the original AE parameter controls or animation.
+For an OPAQUE straight white-core beam on black, --reference-model line tries
+an independently coded, adjustable procedural line glow instead of a colour
+LUT. Other geometries, text/masks and animations are NOT inferred. The AE
+project and full PNG frames are never embedded in the effect.
 
 Два файла *_input.png и reference.json привязаны к конкретному .aex; не меняйте
 их и не используйте с другой сборкой. Импортируйте каждый PNG в
@@ -61,6 +65,10 @@ WASM has a Mix control, NOT the original AE parameter controls or animation.
 .aep полезен для хранения настроек, но сам алгоритм из него не извлекается.
 Конвертер сравнит незнакомые цвета и границы; при большом расхождении WASM
 не выдаётся. Этот порт передаёт только фиксированный вид эффекта + Mix.
+Для непрозрачного прямого луча с белой сердцевиной на чёрном фоне режим
+--reference-model line пробует общий процедурный рендерер вместо цветовой LUT.
+Маски, текст, другие формы и анимацию он НЕ восстанавливает; целые PNG и проект
+AE в WASM не копируются.
 """
 
 

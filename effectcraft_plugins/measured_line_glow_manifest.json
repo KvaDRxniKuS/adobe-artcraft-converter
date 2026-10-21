@@ -1,0 +1,18 @@
+{
+  "api": 1,
+  "id": "org.artcraft_converter.measured_line.template",
+  "name": "Measured line glow (template)",
+  "category": "Generate",
+  "version": "0.1.0",
+  "author": "ArtCraft Converter contributors",
+  "description": "Template for a procedural glowing straight line calibrated from AE PNGs. Not the original proprietary effect. Opaque replacement, fixed preset, no masks/text/animation.",
+  "params": [
+    {"id": "start", "name": "Start", "type": "point", "default": [0.5, 0.15]},
+    {"id": "end", "name": "End", "type": "point", "default": [0.5, 0.85]},
+    {"id": "core_radius", "name": "Core radius (px)", "type": "slider", "default": 3, "min": 0, "max": 128, "decimals": 1},
+    {"id": "core_color", "name": "Core colour", "type": "color", "default": [0.988235, 0.996078, 1, 1]},
+    {"id": "glow_size", "name": "Glow size (%)", "type": "slider", "default": 100, "min": 0, "max": 500, "decimals": 0},
+    {"id": "intensity", "name": "Brightness (%)", "type": "slider", "default": 100, "min": 0, "max": 500, "decimals": 0},
+    {"id": "mix", "name": "Mix (%)", "type": "slider", "default": 100, "min": 0, "max": 100, "decimals": 0}
+  ]
+}

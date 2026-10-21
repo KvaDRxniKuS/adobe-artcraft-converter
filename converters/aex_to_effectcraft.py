@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Inspect any Windows AE .aex and deliver implemented EffectCraft WASM ports.
+"""Inspect Windows AE .aex files; export implemented or validated measured effects.
 
-Unrecognized effect DLLs produce a diagnostic report, NEVER a fake .wasm. The
-Adobe binary is only read, not loaded, executed, decompiled or embedded. A
-working effect requires an independently written implementation for that family.
+Unknown DLLs without passing references get a diagnostic report, NEVER a fake
+.wasm. The Adobe binary is read, not loaded, executed, decompiled or embedded.
+A useful effect needs an independently coded renderer or measured model.
 """
 from __future__ import annotations
 
@@ -24,9 +24,13 @@ from craft_converter.effectcraft_pixel_sorter import MANIFEST, WASM, WASM_SHA256
 from craft_converter.effectcraft_deep_glow import (MANIFEST as GLOW_MANIFEST, WASM as GLOW_WASM,
                                    WASM_SHA256 as GLOW_SHA256)
 from craft_converter.measured_port import (
-    CHECK_AFTER, CHECK_INPUT, TRAIN_AFTER, TRAIN_INPUT, ReferenceError, build_port,
-    failure_report as measured_failure_report, fit as fit_references,
-    prepare_charts, report_text as measured_report_text,
+    CHECK_AFTER, CHECK_INPUT, TRAIN_AFTER, TRAIN_INPUT, ReferenceError,
+    build_port as build_colour_port, failure_report as colour_failure_report,
+    fit as fit_colour_references, prepare_charts, report_text as colour_report_text,
+)
+from craft_converter.measured_beam import (
+    build_port as build_line_port, failure_report as line_failure_report,
+    fit as fit_line_references, report_text as line_report_text,
 )
 from converters.fcproj_to_prproj import same_file
 
@@ -210,8 +214,11 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
                 'non-working file. No WASM was written.\n\n'
                 'For pixel-local colour effects, try the local reference wizard: generate two '
                 'charts with --prepare-reference, render both in AE, then use --reference-dir. '
-                'A validated fixed-setting colour LUT may be exported. Other effects need '
-                'an independently written and tested renderer.\n')
+                'A validated fixed-setting colour LUT may be exported. For straight glowing '
+                'beams on an opaque black background, paired AE renders at two sizes can be '
+                'tested with --reference-model line --reference-dir. These are limited model '
+                'families, not a general DLL-to-WASM translation; other spatial effects need '
+                'their own reference-driven model and independent validation.\n')
     return (f'# Анализ .aex — WASM не создан\n\n'
             f'- Вход: `{source.name}` ({info.size} байт, PE {info.architecture})\n'
             f'- SHA-256: `{info.sha256}`\n'
@@ -229,7 +236,10 @@ def unported_report_text(source: Path, info: AexDetails, language: str = 'ru') -
             'Для попиксельного цветового эффекта можно попробовать локальный мастер: '
             'создайте две картинки (--prepare-reference), обработайте их в AE и передайте '
             '--reference-dir. После проверки он может выдать цветовую 3D-таблицу для одних '
-            'настроек. Для остальных эффектов нужен отдельный проверенный рендерер.\n')
+            'настроек. Для прямого светящегося луча на непрозрачном чёрном фоне можно '
+            'проверить пару рендеров AE разного размера: --reference-model line --reference-dir. '
+            'Это ограниченные семейства моделей, а не перевод любой DLL в WASM; для иных '
+            'пространственных эффектов нужна другая модель по эталонам и независимая проверка.\n')
 
 
 def bounds_script_path(output: Path) -> Path:
@@ -382,8 +392,12 @@ def report_text(source: Path, output: Path, info: AexDetails, language: str = 'r
 
 def convert_aex(source: Path, output: Path, *, language: str = 'ru',
                 ae_profile: Path | None = None, ae_values: Path | None = None,
-                reference_dir: Path | None = None) -> Path:
-    """Export known ports or a validated, fixed-setting measured colour port."""
+                reference_dir: Path | None = None, reference_model: str = 'colour') -> Path:
+    """Export known ports or a validated, fixed-setting colour/line model."""
+    if reference_model not in ('colour', 'line'):
+        raise ValueError('Unknown reference model (choose colour or line).')
+    if reference_model == 'line' and reference_dir is None:
+        raise ValueError('Line generator fitting requires --reference-dir and AE PNGs.')
     source, output = Path(source), Path(output)
     ae_profile = Path(ae_profile) if ae_profile is not None else None
     ae_values = Path(ae_values) if ae_values is not None else None
@@ -410,13 +424,18 @@ def convert_aex(source: Path, output: Path, *, language: str = 'ru',
     profile = load_ae_profile(ae_profile, info.pipl_effects) if ae_profile else None
     if reference_dir is not None:
         if ae_values:
-            raise ValueError('Снимок чисел Deep Glow нельзя совмещать с измеренным цветовым портом.')
+            raise ValueError('Снимок чисел Deep Glow нельзя совмещать с измеренной моделью по PNG.')
         if 'EffectMain' not in info.exports and not info.pipl_effects:
             raise ReferenceError('В DLL не найден EffectMain или AE PiPL; нужен действующий .aex эффекта.')
-        fitted = fit_references(reference_dir, info.sha256)
+        model = ((fit_line_references, build_line_port, line_failure_report, line_report_text)
+                 if reference_model == 'line' else
+                 (fit_colour_references, build_colour_port,
+                  colour_failure_report, colour_report_text))
+        fit_model, build_model, failure_text, success_text = model
+        fitted = fit_model(reference_dir, info.sha256)
         output.parent.mkdir(parents=True, exist_ok=True)
         if not fitted.accepted:
-            text = measured_failure_report(info, fitted, language)
+            text = failure_text(info, fitted, language)
             if profile:
                 text += '\n' + profile_report(profile, language)
             with analysis_report.open('x', encoding='utf-8') as file:
@@ -426,9 +445,9 @@ def convert_aex(source: Path, output: Path, *, language: str = 'ru',
         # one the user actually applied inside AE. Avoid claiming the first PiPL.
         effect_name = (info.pipl_effects[0].name if len(info.pipl_effects) == 1
                        else output_stem(source))
-        wasm, manifest = build_port(info.sha256, effect_name, fitted)
-        text = measured_report_text(source, output, info, manifest, fitted,
-                                    language) + pipl_report_line(info, language)
+        wasm, manifest = build_model(info.sha256, effect_name, fitted)
+        text = success_text(source, output, info, manifest, fitted,
+                            language) + pipl_report_line(info, language)
         if profile:
             text += '\n' + profile_report(profile, language)
         created = []
@@ -518,9 +537,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--ae-values', type=Path,
                         help='Optional Deep Glow numeric settings snapshot exported from a selected AE effect')
     parser.add_argument('--prepare-reference', type=Path, metavar='DIR',
-                        help='Generate two local PNG colour charts for rendering in installed AE')
+                        help='Generate two PNG input charts to render in installed AE')
     parser.add_argument('--reference-dir', type=Path, metavar='DIR',
-                        help='Fit a fixed-setting RGB LUT from the two AE-rendered PNG charts in DIR')
+                        help='Fit a validated colour LUT or measured line-glow model from AE PNGs')
+    parser.add_argument('--reference-model', choices=('colour', 'line'), default='colour',
+                        help='colour: pixel-local LUT (default); line: opaque straight-line glow')
     args = parser.parse_args(argv)
     if args.prepare_reference:
         if args.reference_dir or args.ae_values or args.ae_profile or args.output:
@@ -536,20 +557,29 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = convert_aex(args.input, output, language=args.language,
                              ae_profile=args.ae_profile, ae_values=args.ae_values,
-                             reference_dir=args.reference_dir)
+                             reference_dir=args.reference_dir,
+                             reference_model=args.reference_model)
     except UnsupportedAexError as exc:
         if args.language == 'en':
-            reason = ('Reference validation rejected the measured colour port' if args.reference_dir
-                      else 'No independent port is available')
+            reason = (('Reference validation rejected the measured line model'
+                       if args.reference_model == 'line' else
+                       'Reference validation rejected the measured colour model')
+                      if args.reference_dir else 'No independent port is available')
             print(f'{reason}; no WASM created. Report: {exc.report}', file=sys.stderr)
         else:
-            reason = ('Эталоны не подтвердили измеренный цветовой порт' if args.reference_dir
-                      else 'Нет независимого порта')
+            reason = (('Эталоны не подтвердили процедурный прямой луч'
+                       if args.reference_model == 'line' else
+                       'Эталоны не подтвердили измеренную цветовую модель')
+                      if args.reference_dir else 'Нет независимого порта')
             print(f'{reason}; WASM не создан. Диагностика: {exc.report}', file=sys.stderr)
         return 2
     print(f'Создано: {output}\nОтчёт: {report}')
     if args.reference_dir:
-        print('Создан экспериментальный измеренный цветовой порт с Mix; настройки AE не перенесены.')
+        if args.reference_model == 'line':
+            print('Создан экспериментальный процедурный луч: НЕ алгоритм Saber; '
+                  'см. ограничения и ошибку проверки в отчёте.')
+        else:
+            print('Создан экспериментальный измеренный цветовой порт с Mix; настройки AE не перенесены.')
     elif inspect_aex(args.input).family == 'deep_glow':
         print(f'Применение с расширенными границами: {bounds_script_path(output)}')
     return 0
