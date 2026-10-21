@@ -37,6 +37,17 @@ class RepositoryLayoutTests(unittest.TestCase):
             self.assertTrue((ROOT / directory / '.gitignore').is_file(), directory)
         self.assertIn('*.wasm', (ROOT / 'effectcraft_plugins/.gitignore').read_text())
 
+    def test_user_aex_projects_and_generated_ports_are_not_bundled_in_source_updates(self):
+        from app.update_converter import REQUIRED_FILES
+        self.assertFalse(any(path.lower().endswith(('.aex', '.aex.txt', '.aep', '.aep.txt',
+                                                    '.wasm', '.png')) for path in REQUIRED_FILES))
+        ignore = (ROOT / 'uploads/.gitignore').read_text(encoding='utf-8').splitlines()
+        self.assertIn('*', ignore)
+        effects_ignore = (ROOT / 'effectcraft_plugins/.gitignore').read_text(
+            encoding='utf-8').splitlines()
+        self.assertEqual({line for line in effects_ignore if line.startswith('!/')},
+                         {'!/PixelSorter_EffectCraft.wasm', '!/DeepGlow_EffectCraft.wasm'})
+
 
 if __name__ == '__main__':
     unittest.main()
