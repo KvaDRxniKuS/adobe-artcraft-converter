@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import re
 import shutil
@@ -145,6 +146,37 @@ class AexTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn('PASS', completed.stdout)
 
+    @unittest.skipUnless(importlib.util.find_spec('wasmtime'),
+                         'Optional Wasmtime runtime is not installed')
+    def test_wasm_render_in_second_engine_with_frame_fuel_budget(self):
+        import wasmtime
+        config = wasmtime.Config()
+        config.consume_fuel = True
+        engine = wasmtime.Engine(config)
+        module = wasmtime.Module(engine, WASM)
+        self.assertEqual(list(module.imports), [])
+        store = wasmtime.Store(engine)
+        budget = 50_000_000 + 20_000 * 4  # EffectCraft host's frame budget.
+        store.set_fuel(budget)
+        exports = wasmtime.Instance(store, module, []).exports(store)
+        memory = exports['memory']
+        params = [float(p['default']) for p in MANIFEST['params']]
+        params[4] = 0  # Select every nontransparent pixel.
+        grays = [0.8, 0.2, 0.6, 0.4]
+        data = (b''.join(struct.pack('<d', p) for p in params)
+                + b''.join(struct.pack('<4f', x, x, x, 1.0) for x in grays))
+        base = exports['ec_alloc'](store, len(data))
+        memory.write(store, data, base)
+        rc = exports['ec_render'](store, base + len(params) * 8, 4, 1, base,
+                                  len(params), 0.0, 1.0)
+        self.assertEqual(rc, 0)
+        self.assertGreater(store.get_fuel(), 0)
+        result = [struct.unpack('<f', memory.read(store, base + len(params) * 8 + i * 16,
+                                                  base + len(params) * 8 + i * 16 + 4))[0]
+                  for i in range(4)]
+        for got, expected in zip(result, sorted(grays)):
+            self.assertAlmostEqual(got, expected, places=5)
+
     @unittest.skipUnless(REAL_INSTALLER.is_file(), 'Installer only available in the Arena session')
     def test_installer_is_rejected_without_running_it(self):
         with self.assertRaisesRegex(ValueError, '64-битный'):
@@ -155,6 +187,9 @@ class AexTests(unittest.TestCase):
         info = inspect_aex(REAL_AEX)
         self.assertEqual(info.sha256, '57f8a35fe255986013e43acfd1a9fd1665ca6e1a041025f71d52a010ebbe2d3f')
         self.assertEqual(info.size, 5335552)
+        report = convert_aex(REAL_AEX, self.output)
+        self.assertEqual(self.output.read_bytes(), WASM)
+        self.assertIn(info.sha256, report.read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

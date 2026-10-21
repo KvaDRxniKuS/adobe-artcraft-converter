@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
@@ -74,32 +75,96 @@ class MixedQueueUITests(unittest.TestCase):
             self.assertIn(shortcuts.name, warning.call_args.args[2])
         self.assertEqual(len(self.window.files), 2)
 
-    def test_effectcraft_dialog_stays_outside_project_queue_and_writes_wasm(self):
+    def test_program_and_feature_tabs_preserve_state_on_language_switch(self):
+        self.assertEqual(self.window.program_tabs.count(), 3)
+        self.assertEqual([self.window.program_tabs.tabText(i) for i in range(3)], [
+            'Premiere Pro ↔ FilmCraft', 'After Effects ↔ EffectCraft',
+            'Photoshop ↔ PhotoCraft'])
+        for tabs in (self.window.premiere_tabs, self.window.after_effects_tabs,
+                     self.window.photoshop_tabs):
+            self.assertEqual(tabs.count(), 3)
+        self.assertIs(self.window.premiere_tabs.widget(0).findChild(desktop_app.DropArea),
+                      self.window.drop)  # Real queue belongs to this page.
+        self.assertEqual(self.window.after_effects_tabs.currentIndex(), 2)
+        self.window.program_tabs.setCurrentIndex(1)
+        self.window.after_effects_tabs.setCurrentIndex(0)
+        planned = self.window.after_effects_tabs.currentWidget()
+        self.assertIsInstance(planned, desktop_app.PlannedFeature)
+        self.assertFalse(hasattr(planned, 'run_btn'))
+        self.assertTrue(planned.title_label.text())
+        self.assertIn('EffectCraft', planned.note_label.text())
+        self.assertIn('PhotoCraft', self.window.photoshop_tabs.widget(0).note_label.text())
+        self.window.plugin_panel.input_edit.setText('keep this path')
+        self.window.language_combo.setCurrentIndex(1)
+        self.assertEqual(self.window.program_tabs.currentIndex(), 1)
+        self.assertEqual(self.window.after_effects_tabs.currentIndex(), 0)
+        self.assertIn('Not implemented yet', planned.title_label.text())
+        self.assertIn('planned', self.window.photoshop_tabs.tabText(0))
+        self.assertIn('Not implemented yet', self.window.after_effects_tabs.tabToolTip(0))
+        self.assertEqual(self.window.plugin_panel.input_edit.text(), 'keep this path')
+
+    def test_effectcraft_plugins_tab_stays_outside_project_queue_and_writes_wasm(self):
         from PySide6.QtWidgets import QFileDialog
         source = self.source.with_name('AEPixelSorter2.aex.txt')
         source.write_bytes(sample_aex())
-        self.assertIn('.aex', self.window.plugin_btn.text())
-        with patch.object(desktop_app.AexConverterDialog, 'exec') as shown:
-            self.window.plugin_btn.click()
-            shown.assert_called_once()
-        dialog = desktop_app.AexConverterDialog(self.window, 'en')
-        self.addCleanup(dialog.close)
+        self.window.program_tabs.setCurrentIndex(1)
+        self.window.after_effects_tabs.setCurrentIndex(2)
+        panel = self.window.plugin_panel
+        self.assertIs(self.window.after_effects_tabs.currentWidget(), panel)
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')):
-            dialog.choose_input()
-        self.assertEqual(dialog.input_edit.text(), str(source))
-        output = Path(dialog.output_edit.text())
+            panel.choose_input()
+        self.assertEqual(panel.input_edit.text(), str(source))
+        output = Path(panel.output_edit.text())
         self.assertEqual(output.suffix, '.wasm')
         with patch.object(QMessageBox, 'information') as notice, \
              patch.object(QMessageBox, 'critical') as error:
-            dialog.convert()
+            panel.convert()
             error.assert_not_called()
             notice.assert_called_once()
         self.assertEqual(output.read_bytes()[:4], b'\0asm')
         self.assertTrue(output.with_name(output.stem + '_conversion_report.md').exists())
         self.assertEqual(self.window.files, [])  # Projects still use one shared queue.
         with patch.object(QMessageBox, 'critical') as error:
-            dialog.convert()
+            panel.convert()
             error.assert_called_once()  # Never overwrite the existing WASM/report.
+
+    def test_hotkeys_tab_converts_kys_and_json_without_extra_window(self):
+        from PySide6.QtWidgets import QFileDialog
+        template = Path(desktop_app.__file__).parent / 'Premiere_Shortcuts_Template.kys'
+        keys = self.source.with_name('keys.kys')
+        tree = ET.parse(template)
+        item = next(x for x in tree.getroot().iter()
+                    if x.findtext('commandname') == 'cmd.tools.01pointer')
+        ET.SubElement(item, 'virtualkey').text = str(0x80000000 + ord('V'))
+        ET.SubElement(item, 'modifier.ctrl').text = 'true'
+        tree.write(keys, encoding='utf-8', xml_declaration=True)
+        self.window.program_tabs.setCurrentIndex(0)
+        self.window.premiere_tabs.setCurrentIndex(1)
+        panel = self.window.shortcut_panel
+        self.assertIs(self.window.premiere_tabs.currentWidget(), panel)
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(keys), '')):
+            panel.choose_input()
+        output = Path(panel.output_edit.text())
+        self.assertEqual(output.suffix, '.json')
+        with patch.object(QMessageBox, 'information') as notice, \
+             patch.object(QMessageBox, 'critical') as error:
+            panel.convert()
+            error.assert_not_called()
+            notice.assert_called_once()
+        converted = json.loads(output.read_text(encoding='utf-8'))
+        self.assertEqual(converted['format'], 'filmcraft-keyboard-shortcuts')
+        self.assertIn({'command': 'tool.selection', 'keys': 'Cmd+V'}, converted['bindings'])
+        self.assertTrue(output.with_name(output.stem + '_shortcuts_report.md').exists())
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(output), '')):
+            panel.choose_input()
+        self.assertEqual(Path(panel.output_edit.text()).suffix, '.kys')
+        with patch.object(QMessageBox, 'information') as notice, \
+             patch.object(QMessageBox, 'critical') as error:
+            panel.convert()
+            error.assert_not_called()
+            notice.assert_called_once()
+        self.assertTrue(Path(panel.output_edit.text()).read_bytes().startswith(b'<?xml'))
+        self.assertEqual(self.window.files, [])
 
     def test_optional_shell_belongs_to_selected_fc_item(self):
         second = self.source.with_name('another.fcproj')

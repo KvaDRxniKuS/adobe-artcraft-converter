@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native desktop UI for project/shortcut conversion and an EffectCraft plug-in port.
+"""Native desktop UI grouped by application pair, then project/hotkey/plug-in.
 Built with PySide6. No browser/server is used.
 """
 from __future__ import annotations
@@ -10,20 +10,24 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QLabel, QPushButton, QLineEdit,
     QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView, QVBoxLayout,
-    QHBoxLayout, QProgressBar, QMessageBox, QAbstractItemView, QSizePolicy, QDialog, QComboBox,
-    QScrollArea, QCheckBox,
+    QHBoxLayout, QProgressBar, QMessageBox, QAbstractItemView, QSizePolicy, QComboBox,
+    QScrollArea, QCheckBox, QTabWidget,
 )
 from project_import import FC_TO_PR, ProjectTypeError, convert_queued_project, detect_project_direction
 from reverse_project import ReportWriteError
 from shortcut_converter import convert_fc_to_kys, convert_kys_to_fc
 from aex_to_effectcraft import convert_aex, output_stem
 
-APP_NAME='FilmCraft PRPROJ Converter'
+APP_NAME='Adobe Craft Converter'
 
 TEXT = {
     'ru': {
-        'window_title':'Конвертер Premiere ↔ FilmCraft','header_title':'Premiere  ↔  FilmCraft',
-        'subtitle':'Нативный импорт проектных данных · очередь конвертации','shortcuts':'Горячие клавиши',
+        'window_title':'Конвертер Adobe ↔ Craft','header_title':'Adobe  ↔  Craft',
+        'subtitle':'Выберите пару программ и тип данных · локальная конвертация',
+        'tab_projects':'Проекты','tab_hotkeys':'Горячие клавиши','tab_plugins':'Плагины',
+        'planned_suffix':' · скоро','planned_title':'Пока не реализовано',
+        'planned_note':'Конвертация «{feature}» для {pair} пока не реализована. Здесь появится инструмент, когда он будет готов; файлы не изменяются.',
+        'planned_tooltip':'Пока не реализовано: {feature} · {pair}',
         'language':'Язык / Language','local_app':'ЛОКАЛЬНОЕ ПРИЛОЖЕНИЕ','drop_title':'Перетащите .prproj или .fcproj сюда',
         'drop_note':'Направление определяется по содержимому файла · можно добавить несколько проектов','add':'＋  Добавить проекты',
         'remove':'Удалить выбранные','clear':'Очистить очередь','output_folder':'ПАПКА ВЫВОДА','configurable':'настраивается',
@@ -37,11 +41,11 @@ TEXT = {
 'done_warnings':'Готово: {name} · сообщений в отчёте: {n}','failed':'Ошибка: {name}','queue_finished':'Очередь завершена',
         'close_running_title':'Конвертация выполняется','close_running_text':'Дождитесь завершения очереди, чтобы не прерывать запись проекта.',
         'add_dialog':'Выберите проекты Premiere или FilmCraft','project_filter':'Проекты (*.prproj *.fcproj *.json *.xml *.txt);;Все файлы (*)','premiere_filter':'Проекты Premiere/XML (*.prproj *.xml *.txt);;Все файлы (*)',
-        'output_dialog':'Папка для конвертированных проектов','shortcut_title':'Конвертер горячих клавиш',
+        'output_dialog':'Папка для конвертированных проектов',
         'shortcut_heading':'Premiere KYS ↔ FilmCraft JSON',
         'shortcut_note':'Выберите .kys (XML) или JSON FilmCraft. Направление определяется автоматически; команды без соответствия будут указаны в отчёте.',
         'shortcut_input_placeholder':'Исходный файл .kys или FilmCraft shortcuts .json','shortcut_file':'Файл…',
-        'shortcut_output_placeholder':'Файл результата','save_as':'Сохранить как…','close':'Закрыть','convert':'Конвертировать',
+        'shortcut_output_placeholder':'Файл результата','save_as':'Сохранить как…','convert':'Конвертировать',
         'choose_shortcut_file':'Выберите файл горячих клавиш','shortcut_filter':'Горячие клавиши (*.kys *.json *.txt);;Все файлы (*)',
         'save_shortcuts':'Сохранить набор горячих клавиш','shortcut_save_filter':'FilmCraft JSON (*.json);;Premiere KYS (*.kys)',
         'no_source_title':'Нет исходного файла','no_source':'Выберите существующий файл .kys или FilmCraft JSON.',
@@ -59,10 +63,9 @@ TEXT = {
         'choose_shell_project':'Выберите пустую оболочку Premiere (необязательно)',
         'no_shell':'Указанная пустая оболочка для «{name}» не найдена.',
         'templates_needed_title':'Недоступна оболочка Premiere','templates_needed':'Эти проекты пропущены:\n{details}\n\nУдалите путь или выберите существующую оболочку. Остальные проекты будут обработаны.',
-        'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — используйте отдельное окно','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
+        'invalid_title':'Не удалось добавить проекты','invalid_header':'Пропущены файлы:','invalid_extension':'неподдерживаемое расширение','invalid_format':'не распознан проект Premiere или FilmCraft','invalid_shortcut':'файл горячих клавиш — откройте вкладку «Горячие клавиши»','invalid_missing':'файл не найден','invalid_more':'…и ещё {n}',
         'report_write_failed':'Проект создан, но не удалось сохранить отчёт: {error}',
-        'plugin_button':'EffectCraft: .aex → .wasm',
-        'plugin_title':'Эффект для EffectCraft', 'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
+        'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
         'plugin_note':'Только распознанный AE Pixel Sorter 2. Создаётся самостоятельный рабочий WASM-эффект сортировки пикселей, а не копия/перевод закрытого .aex. Установщик не нужен. Визуальное совпадение с AE не гарантировано.',
         'plugin_input':'Исходный файл AE Pixel Sorter 2 .aex', 'plugin_output':'Новый файл плагина .wasm',
         'plugin_choose':'Выберите AE Pixel Sorter 2 .aex',
@@ -73,8 +76,12 @@ TEXT = {
         'plugin_summary':'WASM с 18 параметрами. Это независимая реализация, а не оригинал; подробности и ограничения в отчёте.',
     },
     'en': {
-        'window_title':'Premiere ↔ FilmCraft Converter','header_title':'Premiere  ↔  FilmCraft',
-        'subtitle':'Native project import · conversion queue','shortcuts':'Keyboard shortcuts',
+        'window_title':'Adobe ↔ Craft Converter','header_title':'Adobe  ↔  Craft',
+        'subtitle':'Choose an application pair and data type · local conversion',
+        'tab_projects':'Projects','tab_hotkeys':'Hotkeys','tab_plugins':'Plugins',
+        'planned_suffix':' · planned','planned_title':'Not implemented yet',
+        'planned_note':'Conversion of {feature} for {pair} is not implemented yet. A tool will appear here when support is added; no files are changed.',
+        'planned_tooltip':'Not implemented yet: {feature} · {pair}',
         'language':'Language / Язык','local_app':'LOCAL DESKTOP APP','drop_title':'Drop .prproj or .fcproj files here',
         'drop_note':'Direction is detected from file content · add multiple projects','add':'＋  Add projects',
         'remove':'Remove selected','clear':'Clear queue','output_folder':'OUTPUT FOLDER','configurable':'configurable',
@@ -88,11 +95,11 @@ TEXT = {
 'done_warnings':'Done: {name} · report messages: {n}','failed':'Error: {name}','queue_finished':'Queue finished',
         'close_running_title':'Conversion in progress','close_running_text':'Wait for the queue to finish so project files are not interrupted during writing.',
         'add_dialog':'Select Premiere or FilmCraft projects','project_filter':'Projects (*.prproj *.fcproj *.json *.xml *.txt);;All files (*)','premiere_filter':'Premiere/XML projects (*.prproj *.xml *.txt);;All files (*)',
-        'output_dialog':'Converted projects folder','shortcut_title':'Keyboard Shortcut Converter',
+        'output_dialog':'Converted projects folder',
         'shortcut_heading':'Premiere KYS ↔ FilmCraft JSON',
         'shortcut_note':'Choose a Premiere .kys (XML) or FilmCraft JSON file. Direction is detected automatically; unmapped commands are listed in the report.',
         'shortcut_input_placeholder':'Input .kys or FilmCraft shortcuts .json file','shortcut_file':'Browse…',
-        'shortcut_output_placeholder':'Output file','save_as':'Save as…','close':'Close','convert':'Convert',
+        'shortcut_output_placeholder':'Output file','save_as':'Save as…','convert':'Convert',
         'choose_shortcut_file':'Choose a shortcut file','shortcut_filter':'Shortcuts (*.kys *.json *.txt);;All files (*)',
         'save_shortcuts':'Save shortcut set','shortcut_save_filter':'FilmCraft JSON (*.json);;Premiere KYS (*.kys)',
         'no_source_title':'No input file','no_source':'Choose an existing .kys or FilmCraft JSON file.',
@@ -110,10 +117,9 @@ TEXT = {
         'choose_shell_project':'Choose an empty Premiere shell (optional)',
         'no_shell':'The selected empty shell for “{name}” was not found.',
         'templates_needed_title':'Premiere shell unavailable','templates_needed':'These projects were skipped:\n{details}\n\nClear the path or select an existing empty shell. Other projects will continue.',
-        'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the separate shortcuts dialog','invalid_missing':'file not found','invalid_more':'…and {n} more',
+        'invalid_title':'Could not add projects','invalid_header':'Skipped files:','invalid_extension':'unsupported extension','invalid_format':'not a recognized Premiere or FilmCraft project','invalid_shortcut':'shortcut file — use the Hotkeys tab','invalid_missing':'file not found','invalid_more':'…and {n} more',
         'report_write_failed':'Project created, but the report could not be saved: {error}',
-        'plugin_button':'EffectCraft: .aex → .wasm',
-        'plugin_title':'EffectCraft Effect', 'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
+        'plugin_heading':'AE Pixel Sorter 2 → EffectCraft',
         'plugin_note':'Recognized AE Pixel Sorter 2 only. Generates a working, independently written pixel-sorting WASM effect, not a copy or translation of the closed-source .aex. No installer required. AE visual parity is not guaranteed.',
         'plugin_input':'Input AE Pixel Sorter 2 .aex', 'plugin_output':'New .wasm effect file',
         'plugin_choose':'Choose AE Pixel Sorter 2 .aex',
@@ -144,108 +150,179 @@ def resource_path(name: str) -> Path:
     return base/name
 
 
-class ShortcutConverterDialog(QDialog):
+class ShortcutConverterPanel(QWidget):
+    """Premiere ↔ FilmCraft shortcut conversion, embedded in its own subtab."""
+
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent)
         self.language = language
-        self.setMinimumWidth(680)
-        self.setStyleSheet('''QDialog{background:#0d1118;color:#edf2f7;font-family:"Segoe UI",Arial,sans-serif;font-size:13px} QLabel{color:#edf2f7} QLabel#muted{color:#9aa6b5;font-size:12px} QLineEdit{background:#0a0e14;border:1px solid #343f4e;border-radius:8px;padding:9px;color:#e9eef4} QPushButton{background:#1b232e;border:1px solid #394555;border-radius:8px;padding:8px 12px;color:#e2e8ef;font-weight:650} QPushButton#primary{background:#71e0bd;color:#08271d;border:0;font-weight:800}''')
-        root = QVBoxLayout(self); root.setContentsMargins(20, 18, 20, 18); root.setSpacing(12)
-        self.title_label = QLabel(); self.title_label.setStyleSheet('font-size:19px;font-weight:750'); root.addWidget(self.title_label)
-        self.note_label = QLabel(); self.note_label.setObjectName('muted'); self.note_label.setWordWrap(True); root.addWidget(self.note_label)
-        row = QHBoxLayout(); self.input_edit = QLineEdit(); self.input_btn = QPushButton(); self.input_btn.clicked.connect(self.choose_input); row.addWidget(self.input_edit, 1); row.addWidget(self.input_btn); root.addLayout(row)
-        row = QHBoxLayout(); self.output_edit = QLineEdit(); self.output_btn = QPushButton(); self.output_btn.clicked.connect(self.choose_output); row.addWidget(self.output_edit, 1); row.addWidget(self.output_btn); root.addLayout(row)
-        footer = QHBoxLayout(); footer.addStretch(); self.cancel_btn = QPushButton(); self.cancel_btn.clicked.connect(self.reject); self.run_btn = QPushButton(); self.run_btn.setObjectName('primary'); self.run_btn.clicked.connect(self.convert); footer.addWidget(self.cancel_btn); footer.addWidget(self.run_btn); root.addLayout(footer)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 22, 22, 22)
+        root.setSpacing(14)
+        self.title_label = QLabel()
+        self.title_label.setObjectName('formTitle')
+        root.addWidget(self.title_label)
+        self.note_label = QLabel()
+        self.note_label.setObjectName('muted')
+        self.note_label.setWordWrap(True)
+        root.addWidget(self.note_label)
+        row = QHBoxLayout()
+        self.input_edit = QLineEdit()
+        self.input_btn = QPushButton()
+        self.input_btn.clicked.connect(self.choose_input)
+        row.addWidget(self.input_edit, 1)
+        row.addWidget(self.input_btn)
+        root.addLayout(row)
+        row = QHBoxLayout()
+        self.output_edit = QLineEdit()
+        self.output_btn = QPushButton()
+        self.output_btn.clicked.connect(self.choose_output)
+        row.addWidget(self.output_edit, 1)
+        row.addWidget(self.output_btn)
+        root.addLayout(row)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self.run_btn = QPushButton()
+        self.run_btn.setObjectName('primary')
+        self.run_btn.clicked.connect(self.convert)
+        footer.addWidget(self.run_btn)
+        root.addLayout(footer)
+        root.addStretch(1)
         self.retranslate()
 
     def retranslate(self):
-        self.setWindowTitle(tr(self.language, 'shortcut_title'))
         self.title_label.setText(tr(self.language, 'shortcut_heading'))
         self.note_label.setText(tr(self.language, 'shortcut_note'))
         self.input_edit.setPlaceholderText(tr(self.language, 'shortcut_input_placeholder'))
         self.input_btn.setText(tr(self.language, 'shortcut_file'))
         self.output_edit.setPlaceholderText(tr(self.language, 'shortcut_output_placeholder'))
         self.output_btn.setText(tr(self.language, 'save_as'))
-        self.cancel_btn.setText(tr(self.language, 'close'))
         self.run_btn.setText(tr(self.language, 'convert'))
 
     def choose_input(self):
-        path, _ = QFileDialog.getOpenFileName(self, tr(self.language, 'choose_shortcut_file'), '', tr(self.language, 'shortcut_filter'))
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr(self.language, 'choose_shortcut_file'), '',
+            tr(self.language, 'shortcut_filter'))
         if not path:
             return
-        self.input_edit.setText(path); p = Path(path)
+        self.input_edit.setText(path)
+        p = Path(path)
         is_json = p.suffix.lower() == '.json'
         if is_json:
-            try: is_json = json.loads(p.read_text(encoding='utf-8-sig')).get('format') == 'filmcraft-keyboard-shortcuts'
-            except Exception: is_json = False
+            try:
+                is_json = json.loads(p.read_text(encoding='utf-8-sig')).get('format') == 'filmcraft-keyboard-shortcuts'
+            except Exception:
+                is_json = False
         if p.suffix.lower() == '.kys' or p.name.lower().endswith('.kys.txt') or not is_json:
             stem = p.name[:-len('.kys.txt')] if p.name.lower().endswith('.kys.txt') else p.stem
             output = p.with_name(stem + '.json')
         else:
             output = p.with_suffix('.kys')
-        if output.exists(): output = unique_path(output.parent, output.stem, output.suffix)
+        if output.exists():
+            output = unique_path(output.parent, output.stem, output.suffix)
         self.output_edit.setText(str(output))
 
     def choose_output(self):
         current = self.output_edit.text().strip() or str(Path.home())
-        path, _ = QFileDialog.getSaveFileName(self, tr(self.language, 'save_shortcuts'), current, tr(self.language, 'shortcut_save_filter'))
-        if path: self.output_edit.setText(path)
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr(self.language, 'save_shortcuts'), current,
+            tr(self.language, 'shortcut_save_filter'))
+        if path:
+            self.output_edit.setText(path)
 
     def convert(self):
         raw_output = self.output_edit.text().strip()
         source = Path(self.input_edit.text().strip())
         if not source.is_file():
-            QMessageBox.warning(self, tr(self.language, 'no_source_title'), tr(self.language, 'no_source')); return
+            QMessageBox.warning(self, tr(self.language, 'no_source_title'),
+                                tr(self.language, 'no_source'))
+            return
         if not raw_output:
-            QMessageBox.warning(self, tr(self.language, 'no_output_title'), tr(self.language, 'no_output')); return
+            QMessageBox.warning(self, tr(self.language, 'no_output_title'),
+                                tr(self.language, 'no_output'))
+            return
         output = Path(raw_output)
         try:
-            is_json = source.suffix.lower() == '.json' and json.loads(source.read_text(encoding='utf-8-sig')).get('format') == 'filmcraft-keyboard-shortcuts'
+            is_json = (source.suffix.lower() == '.json'
+                       and json.loads(source.read_text(encoding='utf-8-sig')).get('format')
+                       == 'filmcraft-keyboard-shortcuts')
             if is_json:
-                warnings = convert_fc_to_kys(source, output, resource_path('Premiere_Shortcuts_Template.kys'), self.language)
+                warnings = convert_fc_to_kys(source, output,
+                                             resource_path('Premiere_Shortcuts_Template.kys'),
+                                             self.language)
             else:
-                warnings = convert_kys_to_fc(source, output, resource_path('FilmCraft_Shortcuts_Template.json'), self.language)
+                warnings = convert_kys_to_fc(source, output,
+                                             resource_path('FilmCraft_Shortcuts_Template.json'),
+                                             self.language)
             report = output.with_name(output.stem + '_shortcuts_report.md')
             report.write_text(
                 f'# {tr(self.language, "report_title")}\n\n'
                 f'- {tr(self.language, "report_input")}: `{source.name}`\n'
                 f'- {tr(self.language, "report_output")}: `{output.name}`\n\n'
-                f'## {tr(self.language, "report_result")}\n\n' + '\n'.join('- ' + x for x in warnings) + '\n',
-                encoding='utf-8')
-            QMessageBox.information(self, tr(self.language, 'conversion_done'), tr(self.language, 'file_created', path=output, summary=warnings[0] if warnings else tr(self.language, 'shortcut_summary_default'), report=report.name))
+                f'## {tr(self.language, "report_result")}\n\n'
+                + '\n'.join('- ' + x for x in warnings) + '\n', encoding='utf-8')
+            QMessageBox.information(
+                self, tr(self.language, 'conversion_done'),
+                tr(self.language, 'file_created', path=output,
+                   summary=warnings[0] if warnings else tr(self.language, 'shortcut_summary_default'),
+                   report=report.name))
         except Exception as exc:
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
 
 
-class AexConverterDialog(QDialog):
-    """Separate tool for plug-ins, not another project-import window."""
+class AexConverterPanel(QWidget):
+    """Independent AE Pixel Sorter port, embedded in After Effects plug-ins tab."""
+
     def __init__(self, parent=None, language='ru'):
         super().__init__(parent)
         self.language = language
-        self.setMinimumWidth(680)
-        self.setStyleSheet('''QDialog{background:#0d1118;color:#edf2f7;font-family:"Segoe UI",Arial,sans-serif;font-size:13px} QLabel{color:#edf2f7} QLabel#muted{color:#9aa6b5;font-size:12px} QLineEdit{background:#0a0e14;border:1px solid #343f4e;border-radius:8px;padding:9px;color:#e9eef4} QPushButton{background:#1b232e;border:1px solid #394555;border-radius:8px;padding:8px 12px;color:#e2e8ef;font-weight:650} QPushButton#primary{background:#71e0bd;color:#08271d;border:0;font-weight:800}''')
-        root = QVBoxLayout(self); root.setContentsMargins(20, 18, 20, 18); root.setSpacing(12)
-        self.title_label = QLabel(); self.title_label.setStyleSheet('font-size:19px;font-weight:750'); root.addWidget(self.title_label)
-        self.note_label = QLabel(); self.note_label.setObjectName('muted'); self.note_label.setWordWrap(True); root.addWidget(self.note_label)
-        row = QHBoxLayout(); self.input_edit = QLineEdit(); self.input_btn = QPushButton(); self.input_btn.clicked.connect(self.choose_input); row.addWidget(self.input_edit, 1); row.addWidget(self.input_btn); root.addLayout(row)
-        row = QHBoxLayout(); self.output_edit = QLineEdit(); self.output_btn = QPushButton(); self.output_btn.clicked.connect(self.choose_output); row.addWidget(self.output_edit, 1); row.addWidget(self.output_btn); root.addLayout(row)
-        footer = QHBoxLayout(); footer.addStretch(); self.cancel_btn = QPushButton(); self.cancel_btn.clicked.connect(self.reject); self.run_btn = QPushButton(); self.run_btn.setObjectName('primary'); self.run_btn.clicked.connect(self.convert); footer.addWidget(self.cancel_btn); footer.addWidget(self.run_btn); root.addLayout(footer)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 22, 22, 22)
+        root.setSpacing(14)
+        self.title_label = QLabel()
+        self.title_label.setObjectName('formTitle')
+        root.addWidget(self.title_label)
+        self.note_label = QLabel()
+        self.note_label.setObjectName('muted')
+        self.note_label.setWordWrap(True)
+        root.addWidget(self.note_label)
+        row = QHBoxLayout()
+        self.input_edit = QLineEdit()
+        self.input_btn = QPushButton()
+        self.input_btn.clicked.connect(self.choose_input)
+        row.addWidget(self.input_edit, 1)
+        row.addWidget(self.input_btn)
+        root.addLayout(row)
+        row = QHBoxLayout()
+        self.output_edit = QLineEdit()
+        self.output_btn = QPushButton()
+        self.output_btn.clicked.connect(self.choose_output)
+        row.addWidget(self.output_edit, 1)
+        row.addWidget(self.output_btn)
+        root.addLayout(row)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        self.run_btn = QPushButton()
+        self.run_btn.setObjectName('primary')
+        self.run_btn.clicked.connect(self.convert)
+        footer.addWidget(self.run_btn)
+        root.addLayout(footer)
+        root.addStretch(1)
         self.retranslate()
 
     def retranslate(self):
-        self.setWindowTitle(tr(self.language, 'plugin_title'))
         self.title_label.setText(tr(self.language, 'plugin_heading'))
         self.note_label.setText(tr(self.language, 'plugin_note'))
         self.input_edit.setPlaceholderText(tr(self.language, 'plugin_input'))
         self.input_btn.setText(tr(self.language, 'shortcut_file'))
         self.output_edit.setPlaceholderText(tr(self.language, 'plugin_output'))
         self.output_btn.setText(tr(self.language, 'save_as'))
-        self.cancel_btn.setText(tr(self.language, 'close'))
         self.run_btn.setText(tr(self.language, 'convert'))
 
     def choose_input(self):
-        path, _ = QFileDialog.getOpenFileName(self, tr(self.language, 'plugin_choose'),
-                                              '', tr(self.language, 'plugin_filter'))
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr(self.language, 'plugin_choose'), '',
+            tr(self.language, 'plugin_filter'))
         if not path:
             return
         self.input_edit.setText(path)
@@ -263,8 +340,9 @@ class AexConverterDialog(QDialog):
 
     def choose_output(self):
         current = self.output_edit.text().strip() or str(Path.home())
-        path, _ = QFileDialog.getSaveFileName(self, tr(self.language, 'plugin_save'),
-                                               current, tr(self.language, 'plugin_save_filter'))
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr(self.language, 'plugin_save'), current,
+            tr(self.language, 'plugin_save_filter'))
         if path:
             self.output_edit.setText(path)
 
@@ -282,11 +360,43 @@ class AexConverterDialog(QDialog):
         output = Path(raw_output)
         try:
             report = convert_aex(source, output, language=self.language)
-            QMessageBox.information(self, tr(self.language, 'conversion_done'),
-                                    tr(self.language, 'file_created', path=output,
-                                       summary=tr(self.language, 'plugin_summary'), report=report))
+            QMessageBox.information(
+                self, tr(self.language, 'conversion_done'),
+                tr(self.language, 'file_created', path=output,
+                   summary=tr(self.language, 'plugin_summary'), report=report))
         except Exception as exc:
             QMessageBox.critical(self, tr(self.language, 'conversion_error'), str(exc))
+
+
+class PlannedFeature(QWidget):
+    """Clearly labeled, non-converting placeholder for an unsupported pair/type."""
+
+    def __init__(self, program: str, feature: str, language: str):
+        super().__init__()
+        self.program = program
+        self.feature = feature
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 22, 22, 22)
+        card = QFrame()
+        card.setObjectName('panel')
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(24, 24, 24, 24)
+        inner.setSpacing(10)
+        self.title_label = QLabel()
+        self.title_label.setObjectName('formTitle')
+        self.note_label = QLabel()
+        self.note_label.setObjectName('muted')
+        self.note_label.setWordWrap(True)
+        inner.addWidget(self.title_label)
+        inner.addWidget(self.note_label)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        self.retranslate(language)
+
+    def retranslate(self, language: str):
+        self.title_label.setText(tr(language, 'planned_title'))
+        self.note_label.setText(tr(language, 'planned_note', pair=self.program,
+                                   feature=tr(language, 'tab_' + self.feature)))
 
 
 class DropArea(QFrame):
@@ -360,15 +470,11 @@ class MainWindow(QMainWindow):
         self._loading_reverse = False
         self.last_status = ('ready', {})
 
-        # Keep controls accessible on smaller laptop screens when FC settings appear.
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        self.setCentralWidget(scroll)
-        central = QWidget()
-        root = QVBoxLayout(central)
-        root.setContentsMargins(26, 20, 26, 20)
-        root.setSpacing(12)
+        shell = QWidget()
+        self.setCentralWidget(shell)
+        outer = QVBoxLayout(shell)
+        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setSpacing(12)
 
         header = QHBoxLayout()
         brand = QVBoxLayout()
@@ -381,9 +487,6 @@ class MainWindow(QMainWindow):
         brand.addWidget(self.subtitle_label)
         header.addLayout(brand)
         header.addStretch()
-        self.shortcuts_btn = QPushButton()
-        self.shortcuts_btn.clicked.connect(self.open_shortcut_converter)
-        header.addWidget(self.shortcuts_btn, 0, Qt.AlignTop)
         self.language_combo = QComboBox()
         self.language_combo.addItem('Русский', 'ru')
         self.language_combo.addItem('English', 'en')
@@ -393,7 +496,30 @@ class MainWindow(QMainWindow):
         self.local_tag = QLabel()
         self.local_tag.setObjectName('tag')
         header.addWidget(self.local_tag, 0, Qt.AlignTop)
-        root.addLayout(header)
+        outer.addLayout(header)
+
+        # Program pair first; each pair then has its own data-type tabs.
+        # The existing mixed PR/FC project queue remains ONE inline page.
+        self.program_tabs = QTabWidget()
+        self.program_tabs.setObjectName('programTabs')
+        outer.addWidget(self.program_tabs, 1)
+        self.premiere_tabs = QTabWidget()
+        self.after_effects_tabs = QTabWidget()
+        self.photoshop_tabs = QTabWidget()
+        for tabs in (self.premiere_tabs, self.after_effects_tabs, self.photoshop_tabs):
+            tabs.setObjectName('featureTabs')
+        self.program_tabs.addTab(self.premiere_tabs, 'Premiere Pro ↔ FilmCraft')
+        self.program_tabs.addTab(self.after_effects_tabs, 'After Effects ↔ EffectCraft')
+        self.program_tabs.addTab(self.photoshop_tabs, 'Photoshop ↔ PhotoCraft')
+
+        # Only the project page needs a tall scrollable queue.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        central = QWidget()
+        root = QVBoxLayout(central)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
 
         self.drop = DropArea(self.language)
         self.drop.filesDropped.connect(self.add_paths)
@@ -401,14 +527,11 @@ class MainWindow(QMainWindow):
         actions = QHBoxLayout()
         self.add_btn = QPushButton()
         self.add_btn.clicked.connect(self.choose_files)
-        self.plugin_btn = QPushButton()
-        self.plugin_btn.clicked.connect(self.open_aex_converter)
         self.remove_btn = QPushButton()
         self.remove_btn.clicked.connect(self.remove_selected)
         self.clear_btn = QPushButton()
         self.clear_btn.clicked.connect(self.clear_queue)
         actions.addWidget(self.add_btn)
-        actions.addWidget(self.plugin_btn)
         actions.addWidget(self.remove_btn)
         actions.addStretch()
         actions.addWidget(self.clear_btn)
@@ -510,10 +633,29 @@ class MainWindow(QMainWindow):
         self.footnote_label.setWordWrap(True)
         root.addWidget(self.footnote_label)
         scroll.setWidget(central)
+        self.premiere_tabs.addTab(scroll, '')
+        self.shortcut_panel = ShortcutConverterPanel(self.premiere_tabs, self.language)
+        self.premiere_tabs.addTab(self.shortcut_panel, '')
+
+        self.planned_features: list[tuple[QTabWidget, PlannedFeature, str]] = []
+        self.add_planned_feature(self.premiere_tabs, 'Premiere Pro ↔ FilmCraft', 'plugins')
+        self.add_planned_feature(self.after_effects_tabs, 'After Effects ↔ EffectCraft', 'projects')
+        self.add_planned_feature(self.after_effects_tabs, 'After Effects ↔ EffectCraft', 'hotkeys')
+        self.plugin_panel = AexConverterPanel(self.after_effects_tabs, self.language)
+        self.after_effects_tabs.addTab(self.plugin_panel, '')
+        for feature in ('projects', 'hotkeys', 'plugins'):
+            self.add_planned_feature(self.photoshop_tabs, 'Photoshop ↔ PhotoCraft', feature)
+        # Switching to After Effects opens the implemented plug-in page, not a placeholder.
+        self.after_effects_tabs.setCurrentIndex(2)
 
         self.apply_theme()
         self.retranslate()
         self.refresh()
+
+    def add_planned_feature(self, tabs: QTabWidget, program: str, feature: str):
+        placeholder = PlannedFeature(program, feature, self.language)
+        tabs.addTab(placeholder, '')
+        self.planned_features.append((tabs, placeholder, feature))
 
     @staticmethod
     def add_reverse_row(layout):
@@ -546,12 +688,24 @@ class MainWindow(QMainWindow):
         self.header_title.setText(self.t('header_title').replace(
             '↔', '<span style="color:#647184">↔</span>'))
         self.subtitle_label.setText(self.t('subtitle'))
-        self.shortcuts_btn.setText(self.t('shortcuts'))
         self.local_tag.setText(self.t('local_app'))
+        for tabs in (self.premiere_tabs, self.after_effects_tabs, self.photoshop_tabs):
+            for index, feature in enumerate(('projects', 'hotkeys', 'plugins')):
+                tabs.setTabText(index, self.t('tab_' + feature))
+        for tabs, placeholder, feature in self.planned_features:
+            placeholder.retranslate(self.language)
+            index = tabs.indexOf(placeholder)
+            tabs.setTabText(index, self.t('tab_' + feature) + self.t('planned_suffix'))
+            tabs.setTabToolTip(index, self.t('planned_tooltip',
+                                            feature=self.t('tab_' + feature),
+                                            pair=placeholder.program))
+        self.shortcut_panel.language = self.language
+        self.shortcut_panel.retranslate()
+        self.plugin_panel.language = self.language
+        self.plugin_panel.retranslate()
         self.drop.language = self.language
         self.drop.retranslate()
         self.add_btn.setText(self.t('add'))
-        self.plugin_btn.setText(self.t('plugin_button'))
         self.remove_btn.setText(self.t('remove'))
         self.clear_btn.setText(self.t('clear'))
         self.output_title.setText(self.t('output_folder'))
@@ -576,17 +730,16 @@ class MainWindow(QMainWindow):
         self.last_status = (key, values)
         self.status_label.setText(self.t(key, **values))
 
-    def open_shortcut_converter(self):
-        ShortcutConverterDialog(self, self.language).exec()
-
-    def open_aex_converter(self):
-        AexConverterDialog(self, self.language).exec()
-
     def apply_theme(self):
         self.setStyleSheet('''
             QWidget{background:#0d1118;color:#edf2f7;font-family:"Segoe UI",Arial,sans-serif;font-size:13px}
             QLabel#title{font-size:24px;font-weight:750;letter-spacing:-.4px;color:#f5f7fa}
+            QLabel#formTitle{font-size:20px;font-weight:750;color:#f5f7fa}
             QLabel#muted,QLabel#footnote{color:#9aa6b5;font-size:12px}
+            QTabWidget::pane{border:1px solid #2b3a47;border-radius:11px;background:#111720}
+            QTabBar::tab{background:#171e29;color:#aab7c6;border:1px solid #344250;border-bottom:0;border-top-left-radius:9px;border-top-right-radius:9px;padding:10px 15px;margin-right:3px;font-weight:700}
+            QTabBar::tab:selected{color:#90e9c8;background:#22372f;border-color:#54a98c}
+            QTabBar::tab:hover:!selected{color:#e5f0ed;background:#273340}
             QLabel#tag{color:#9cebd2;background:#152721;border:1px solid #315a4e;border-radius:10px;padding:7px 10px;font-size:10px;font-weight:750;letter-spacing:.6px}
             QLabel#section{font-size:11px;font-weight:800;letter-spacing:1px;color:#b8c4d2}
             QFrame#dropArea{background:#131a23;border:2px dashed #435063;border-radius:16px}
